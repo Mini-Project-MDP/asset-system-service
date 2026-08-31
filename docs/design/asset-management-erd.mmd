@@ -1,0 +1,407 @@
+erDiagram
+    REGIONS {
+        string id PK
+        string code UK
+        string name
+        boolean is_active
+        int version
+        datetime created_at
+        datetime updated_at
+    }
+
+    OUTLETS {
+        string id PK
+        string code UK
+        string name
+        string region_id FK
+        boolean is_active
+        int version
+        datetime created_at
+        datetime updated_at
+    }
+
+    DISTRIBUTORS {
+        string id PK
+        string code UK
+        string name
+        boolean is_active
+        int version
+        datetime created_at
+        datetime updated_at
+    }
+
+    DISTRIBUTOR_OUTLETS {
+        string distributor_id PK,FK
+        string outlet_id PK,FK
+        datetime valid_from
+        datetime valid_until
+        boolean is_active
+        datetime created_at
+    }
+
+    SALES_DIVISIONS {
+        string id PK
+        string code UK
+        string name
+        boolean is_active
+        int version
+        datetime created_at
+        datetime updated_at
+    }
+
+    USERS {
+        string id PK
+        string employee_no UK
+        string name
+        string email UK
+        string status
+        int version
+        datetime created_at
+        datetime updated_at
+    }
+
+    ROLES {
+        string id PK
+        string code UK
+        string name
+        string role_type
+        int approval_rank
+        boolean is_active
+        int version
+        datetime created_at
+        datetime updated_at
+    }
+
+    USER_ROLES {
+        string id PK
+        string user_id FK
+        string role_id FK
+        string distributor_id FK
+        string outlet_id FK
+        boolean is_primary
+        datetime valid_from
+        datetime valid_until
+        datetime created_at
+    }
+
+    ASSET_TYPES {
+        string id PK
+        string code UK
+        string name
+        string identifier_type
+        boolean identifier_required
+        boolean is_active
+        int version
+        datetime created_at
+        datetime updated_at
+    }
+
+    REQUEST_TYPES {
+        string id PK
+        string asset_type_id FK
+        string code UK
+        string name
+        boolean is_active
+        int version
+        datetime created_at
+        datetime updated_at
+    }
+
+    WORKFLOW_DEFINITIONS {
+        string id PK
+        string code UK
+        string name
+        int version
+        string status
+        datetime effective_from
+        datetime effective_until
+        datetime created_at
+        datetime updated_at
+    }
+
+    WORKFLOW_BINDINGS {
+        string id PK
+        string workflow_definition_id FK
+        string source_system
+        string reference_type
+        string asset_type_id FK
+        int priority
+        boolean is_active
+        int version
+        datetime created_at
+        datetime updated_at
+    }
+
+    WORKFLOW_STEPS {
+        string id PK
+        string workflow_definition_id FK
+        int sequence_no
+        string role_id FK
+        boolean is_required
+        int sla_hours
+        int version
+        datetime created_at
+        datetime updated_at
+    }
+
+    ASSET_REQUESTS {
+        string id PK
+        string request_no UK
+        string asset_type_id FK
+        string request_type_id FK
+        string distributor_id FK
+        string outlet_id FK
+        string sales_division_id FK
+        string requester_user_id FK
+        string requester_role_id FK
+        string requester_name_snapshot
+        string created_by_user_id FK
+        int quantity
+        string priority
+        string status
+        int revision_no
+        int version
+        string notes
+        datetime submitted_at
+        datetime approved_at
+        datetime completed_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    REQUEST_REVISIONS {
+        string id PK
+        string request_id FK
+        int revision_no
+        string changed_by_user_id FK
+        string change_reason
+        text snapshot_json
+        datetime created_at
+    }
+
+    WORKFLOW_INSTANCES {
+        string id PK
+        string instance_no UK
+        string workflow_definition_id FK
+        int workflow_version
+        string source_system
+        string reference_type
+        string reference_id
+        string status
+        int current_sequence_no
+        datetime started_at
+        datetime completed_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    APPROVAL_TASKS {
+        string id PK
+        string workflow_instance_id FK
+        string workflow_step_id FK
+        int sequence_no
+        string role_id FK
+        string assigned_to_user_id FK
+        string status
+        string acted_by_user_id FK
+        int version
+        datetime activated_at
+        datetime acted_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    APPROVAL_ACTIONS {
+        string id PK
+        string workflow_instance_id FK
+        string approval_task_id FK
+        string action
+        string actor_user_id FK
+        string actor_role_id FK
+        string comment
+        text metadata_json
+        datetime created_at
+    }
+
+    FULFILLMENTS {
+        string id PK
+        string fulfillment_no UK
+        string request_id FK
+        string assigned_to_user_id FK
+        string status
+        string tracking_no
+        string notes
+        int version
+        datetime started_at
+        datetime shipped_at
+        datetime delivered_at
+        datetime completed_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    FULFILLMENT_ITEMS {
+        string id PK
+        string fulfillment_id FK
+        int unit_no
+        string asset_id FK
+        string status
+        string notes
+        datetime created_at
+        datetime updated_at
+    }
+
+    FULFILLMENT_EVENTS {
+        string id PK
+        string fulfillment_id FK
+        string from_status
+        string to_status
+        string actor_user_id FK
+        string notes
+        datetime created_at
+    }
+
+    ASSETS {
+        string id PK
+        string asset_code UK
+        string asset_type_id FK
+        string registered_from_request_id FK
+        string distributor_id FK
+        string outlet_id FK
+        string current_holder_user_id FK
+        string status
+        int version
+        datetime registered_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    ASSET_IDENTIFIERS {
+        string id PK
+        string asset_id FK
+        string identifier_type
+        string identifier_value UK
+        boolean is_primary
+        datetime created_at
+    }
+
+    ASSET_ASSIGNMENTS {
+        string id PK
+        string asset_id FK
+        string assigned_to_user_id FK
+        string outlet_id FK
+        string assigned_by_user_id FK
+        datetime assigned_at
+        datetime returned_at
+        string notes
+    }
+
+    ASSET_HISTORY {
+        string id PK
+        string asset_id FK
+        string event_type
+        string from_status
+        string to_status
+        string actor_user_id FK
+        string reference_type
+        string reference_id
+        string notes
+        datetime created_at
+    }
+
+    NOTIFICATIONS {
+        string id PK
+        string user_id FK
+        string notification_type
+        string title
+        string message
+        string reference_type
+        string reference_id
+        datetime read_at
+        datetime created_at
+    }
+
+    AUDIT_LOGS {
+        string id PK
+        string actor_user_id FK
+        string action
+        string entity_type
+        string entity_id
+        text before_json
+        text after_json
+        string request_id
+        string ip_address
+        datetime created_at
+    }
+
+    OUTBOX_EVENTS {
+        string id PK
+        string aggregate_type
+        string aggregate_id
+        string event_type
+        text payload_json
+        string status
+        int retry_count
+        datetime available_at
+        datetime processed_at
+        datetime created_at
+    }
+
+    REGIONS ||--o{ OUTLETS : contains
+    DISTRIBUTORS ||--o{ DISTRIBUTOR_OUTLETS : covers
+    OUTLETS ||--o{ DISTRIBUTOR_OUTLETS : mapped_to
+
+    USERS ||--o{ USER_ROLES : has
+    ROLES ||--o{ USER_ROLES : assigned_as
+    DISTRIBUTORS o|--o{ USER_ROLES : scopes
+    OUTLETS o|--o{ USER_ROLES : scopes
+
+    ASSET_TYPES ||--o{ REQUEST_TYPES : offers
+    WORKFLOW_DEFINITIONS ||--o{ WORKFLOW_BINDINGS : selected_by
+    ASSET_TYPES o|--o{ WORKFLOW_BINDINGS : binds
+    WORKFLOW_DEFINITIONS ||--|{ WORKFLOW_STEPS : contains
+    ROLES ||--o{ WORKFLOW_STEPS : requires
+
+    ASSET_TYPES ||--o{ ASSET_REQUESTS : requested_as
+    REQUEST_TYPES o|--o{ ASSET_REQUESTS : classifies
+    DISTRIBUTORS ||--o{ ASSET_REQUESTS : receives
+    OUTLETS ||--o{ ASSET_REQUESTS : destination
+    SALES_DIVISIONS ||--o{ ASSET_REQUESTS : requested_for
+    USERS o|--o{ ASSET_REQUESTS : requester
+    ROLES ||--o{ ASSET_REQUESTS : requester_role
+    USERS ||--o{ ASSET_REQUESTS : created_by
+    ASSET_REQUESTS ||--o{ REQUEST_REVISIONS : snapshots
+    USERS ||--o{ REQUEST_REVISIONS : changed_by
+
+    WORKFLOW_DEFINITIONS ||--o{ WORKFLOW_INSTANCES : instantiates
+    ASSET_REQUESTS ||--o| WORKFLOW_INSTANCES : logical_reference
+    WORKFLOW_INSTANCES ||--|{ APPROVAL_TASKS : generates
+    WORKFLOW_STEPS ||--o{ APPROVAL_TASKS : materializes
+    ROLES ||--o{ APPROVAL_TASKS : assigned_role
+    USERS o|--o{ APPROVAL_TASKS : assigned_user
+    WORKFLOW_INSTANCES ||--o{ APPROVAL_ACTIONS : records
+    APPROVAL_TASKS o|--o{ APPROVAL_ACTIONS : acted_on
+    USERS ||--o{ APPROVAL_ACTIONS : performed_by
+    ROLES ||--o{ APPROVAL_ACTIONS : performed_as
+
+    ASSET_REQUESTS ||--o| FULFILLMENTS : creates
+    USERS o|--o{ FULFILLMENTS : assigned_to
+    FULFILLMENTS ||--|{ FULFILLMENT_ITEMS : contains
+    FULFILLMENTS ||--o{ FULFILLMENT_EVENTS : transitions
+    USERS ||--o{ FULFILLMENT_EVENTS : performed_by
+
+    ASSET_TYPES ||--o{ ASSETS : categorizes
+    ASSET_REQUESTS o|--o{ ASSETS : registers
+    DISTRIBUTORS o|--o{ ASSETS : supplied_by
+    OUTLETS ||--o{ ASSETS : located_at
+    USERS o|--o{ ASSETS : held_by
+    ASSETS o|--o{ FULFILLMENT_ITEMS : produced_as
+    ASSETS ||--o{ ASSET_IDENTIFIERS : identified_by
+    ASSETS ||--o{ ASSET_ASSIGNMENTS : assigned_through
+    USERS o|--o{ ASSET_ASSIGNMENTS : assigned_to
+    OUTLETS ||--o{ ASSET_ASSIGNMENTS : assigned_at
+    USERS ||--o{ ASSET_ASSIGNMENTS : assigned_by
+    ASSETS ||--o{ ASSET_HISTORY : changes
+
+    USERS ||--o{ NOTIFICATIONS : receives
+    USERS o|--o{ AUDIT_LOGS : acts
