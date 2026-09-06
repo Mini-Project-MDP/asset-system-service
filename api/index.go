@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/Mini-Project-MDP/asset-system-service/internal/app"
-	"github.com/Mini-Project-MDP/asset-system-service/internal/config"
-	"github.com/Mini-Project-MDP/asset-system-service/internal/infrastructure/database"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/app"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/config"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/infrastructure/database"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
 )
 
