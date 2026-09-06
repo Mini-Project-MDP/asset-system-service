@@ -16,6 +16,8 @@ const (
 	defaultAppEnvironment      = "development"
 	defaultAppPort             = 8080
 	defaultDatabasePingTimeout = 5 * time.Second
+	defaultJWTSecret           = "mayora-super-secret-jwt-key-2026"
+	defaultJWTExpiry           = 24 * time.Hour
 )
 
 // Config contains all runtime configuration required by the API.
@@ -25,6 +27,8 @@ type Config struct {
 	DatabaseURL         string
 	DatabaseAuthToken   string
 	DatabasePingTimeout time.Duration
+	JWTSecret           string
+	JWTExpiryDuration   time.Duration
 }
 
 // Address returns the HTTP server address derived from APP_PORT.
@@ -74,12 +78,21 @@ func loadFromEnvironment(lookup environmentLookup) (Config, error) {
 		return Config{}, fmt.Errorf("DATABASE_PING_TIMEOUT must be a positive duration such as 5s")
 	}
 
+	jwtSecret := valueOrDefault(lookup, "JWT_SECRET", defaultJWTSecret)
+	jwtExpiryStr := valueOrDefault(lookup, "JWT_EXPIRY", defaultJWTExpiry.String())
+	jwtExpiryDuration, err := time.ParseDuration(jwtExpiryStr)
+	if err != nil || jwtExpiryDuration <= 0 {
+		jwtExpiryDuration = defaultJWTExpiry
+	}
+
 	return Config{
 		AppEnvironment:      appEnvironment,
 		AppPort:             appPort,
 		DatabaseURL:         databaseURL,
 		DatabaseAuthToken:   databaseAuthToken,
 		DatabasePingTimeout: databasePingTimeout,
+		JWTSecret:           jwtSecret,
+		JWTExpiryDuration:   jwtExpiryDuration,
 	}, nil
 }
 

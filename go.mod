@@ -5,9 +5,12 @@ go 1.27.0
 require (
 	github.com/gofiber/contrib/v3/swaggerui v1.0.11
 	github.com/gofiber/fiber/v3 v3.5.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/swaggo/swag v1.16.6
 	github.com/tursodatabase/libsql-client-go v0.0.0-20260528064733-9d5d30a29a60
+	golang.org/x/crypto v0.55.0
 )
 
 require (
@@ -22,7 +25,6 @@ require (
 	github.com/go-openapi/swag v0.22.4 // indirect
 	github.com/gofiber/schema v1.8.4 // indirect
 	github.com/gofiber/utils/v2 v2.4.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
@@ -32,7 +34,6 @@ require (
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.73.0 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.58.0 // indirect

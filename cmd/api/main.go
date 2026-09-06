@@ -16,6 +16,7 @@ import (
 
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/app"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/config"
+	infraAuth "github.com/Mini-Project-MDP/asset-system-service/pkg/infrastructure/auth"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/infrastructure/database"
 	"github.com/gofiber/fiber/v3"
 )
@@ -49,9 +50,18 @@ func run() error {
 	}
 	defer closeDatabase(databaseConnection)
 
+	// Run Database Schema Migrations and Seeding
+	if err := database.MigrateAndSeed(context.Background(), databaseConnection); err != nil {
+		log.Printf("Warning: Database migration & seed: %v", err)
+	}
+
+	tokenManager := infraAuth.NewTokenManager(applicationConfig.JWTSecret, applicationConfig.JWTExpiryDuration)
+
 	fiberApp := app.NewRouter(app.Dependencies{
 		Database:            databaseConnection,
+		SQLDB:               databaseConnection,
 		DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
+		TokenManager:        tokenManager,
 	})
 
 	serverErrors := make(chan error, 1)
@@ -96,4 +106,3 @@ func closeDatabase(databaseConnection *sql.DB) {
 		log.Printf("close database: %v", err)
 	}
 }
-
