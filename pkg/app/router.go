@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"os"
 	"time"
 
+	"github.com/gofiber/contrib/swagger"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -26,12 +28,34 @@ func NewRouter(dependencies Dependencies) *fiber.App {
 		DisableStartupMessage: true,
 	})
 
+	// Official maintained Swagger middleware from github.com/gofiber/contrib/swagger
+	swaggerPath := "./docs/swagger.json"
+	if _, err := os.Stat(swaggerPath); err != nil {
+		if _, errParent := os.Stat("../../docs/swagger.json"); errParent == nil {
+			swaggerPath = "../../docs/swagger.json"
+		}
+	}
+	if _, err := os.Stat(swaggerPath); err == nil {
+		app.Use(swagger.New(swagger.Config{
+			BasePath: "/",
+			FilePath: swaggerPath,
+			Path:     "swagger",
+			Title:    "Asset System Service API Documentation",
+		}))
+	}
+
 	app.Get("/health", health)
 	app.Get("/ready", ready(dependencies))
 
 	return app
 }
 
+// @Summary Service health status
+// @Description Returns operational status of the service
+// @Tags System
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Router /health [get]
 func health(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"status":  "ok",
@@ -39,6 +63,13 @@ func health(c *fiber.Ctx) error {
 	})
 }
 
+// @Summary Service readiness status
+// @Description Verifies database connectivity and readiness of the service
+// @Tags System
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Failure 503 {object} map[string]string
+// @Router /ready [get]
 func ready(dependencies Dependencies) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		ctx, cancel := context.WithTimeout(c.UserContext(), dependencies.DatabasePingTimeout)
@@ -59,4 +90,5 @@ func ready(dependencies Dependencies) fiber.Handler {
 		})
 	}
 }
+
 

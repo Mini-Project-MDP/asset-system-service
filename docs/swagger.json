@@ -1,0 +1,52 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Asset System Service API",
+    "description": "Asset Management System Backend Microservice built with Go Fiber.",
+    "version": "1.0"
+  },
+  "basePath": "/",
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Service health status",
+        "description": "Returns operational status of the service",
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Service readiness status",
+        "description": "Verifies database connectivity and readiness of the service",
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "schema": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "schema": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

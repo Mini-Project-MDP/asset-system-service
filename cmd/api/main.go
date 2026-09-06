@@ -1,3 +1,8 @@
+// @title Asset System Service API
+// @version 1.0
+// @description Asset Management System Backend Microservice built with Go Fiber.
+// @host
+// @BasePath /
 package main
 
 import (
