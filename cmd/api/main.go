@@ -17,6 +17,7 @@ import (
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/app"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/config"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/infrastructure/database"
+	"github.com/gofiber/fiber/v3"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -55,7 +56,9 @@ func run() error {
 
 	serverErrors := make(chan error, 1)
 	go func() {
-		serverErrors <- fiberApp.Listen(applicationConfig.Address())
+		serverErrors <- fiberApp.Listen(applicationConfig.Address(), fiber.ListenConfig{
+			DisableStartupMessage: true,
+		})
 	}()
 
 	log.Printf(

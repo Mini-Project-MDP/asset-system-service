@@ -70,7 +70,7 @@ func performRequest(t *testing.T, database DatabasePinger, path string) *http.Re
 	})
 
 	request := httptest.NewRequest(http.MethodGet, path, nil)
-	response, err := app.Test(request, -1)
+	response, err := app.Test(request)
 	if err != nil {
 		t.Fatalf("app.Test failed: %v", err)
 	}

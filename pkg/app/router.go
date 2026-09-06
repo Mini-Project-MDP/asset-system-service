@@ -2,11 +2,11 @@ package app
 
 import (
 	"context"
-	"os"
 	"time"
 
-	"github.com/gofiber/contrib/swagger"
-	"github.com/gofiber/fiber/v2"
+	"github.com/Mini-Project-MDP/asset-system-service/docs"
+	"github.com/gofiber/contrib/v3/swaggerui"
+	"github.com/gofiber/fiber/v3"
 )
 
 const serviceName = "asset-system-service"
@@ -24,25 +24,15 @@ type Dependencies struct {
 
 // NewRouter builds the HTTP router for the service.
 func NewRouter(dependencies Dependencies) *fiber.App {
-	app := fiber.New(fiber.Config{
-		DisableStartupMessage: true,
-	})
+	app := fiber.New()
 
-	// Official maintained Swagger middleware from github.com/gofiber/contrib/swagger
-	swaggerPath := "./docs/swagger.json"
-	if _, err := os.Stat(swaggerPath); err != nil {
-		if _, errParent := os.Stat("../../docs/swagger.json"); errParent == nil {
-			swaggerPath = "../../docs/swagger.json"
-		}
-	}
-	if _, err := os.Stat(swaggerPath); err == nil {
-		app.Use(swagger.New(swagger.Config{
-			BasePath: "/",
-			FilePath: swaggerPath,
-			Path:     "swagger",
-			Title:    "Asset System Service API Documentation",
-		}))
-	}
+	// Official Fiber v3 Swagger UI middleware from github.com/gofiber/contrib/v3/swaggerui
+	app.Use(swaggerui.New(swaggerui.Config{
+		BasePath:    "/",
+		FileContent: docs.SwaggerJSON,
+		Path:        "swagger",
+		Title:       "Asset System Service API Documentation",
+	}))
 
 	app.Get("/health", health)
 	app.Get("/ready", ready(dependencies))
@@ -56,7 +46,7 @@ func NewRouter(dependencies Dependencies) *fiber.App {
 // @Produce json
 // @Success 200 {object} map[string]string
 // @Router /health [get]
-func health(c *fiber.Ctx) error {
+func health(c fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"status":  "ok",
 		"service": serviceName,
@@ -71,8 +61,8 @@ func health(c *fiber.Ctx) error {
 // @Failure 503 {object} map[string]string
 // @Router /ready [get]
 func ready(dependencies Dependencies) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		ctx, cancel := context.WithTimeout(c.UserContext(), dependencies.DatabasePingTimeout)
+	return func(c fiber.Ctx) error {
+		ctx, cancel := context.WithTimeout(c.Context(), dependencies.DatabasePingTimeout)
 		defer cancel()
 
 		if err := dependencies.Database.PingContext(ctx); err != nil {
@@ -90,5 +80,6 @@ func ready(dependencies Dependencies) fiber.Handler {
 		})
 	}
 }
+
 
 

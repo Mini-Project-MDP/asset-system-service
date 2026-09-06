@@ -11,7 +11,7 @@ import (
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/app"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/config"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/infrastructure/database"
-	"github.com/gofiber/fiber/v2/middleware/adaptor"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 )
 
 var (
