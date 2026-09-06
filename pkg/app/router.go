@@ -7,6 +7,7 @@ import (
 	"github.com/Mini-Project-MDP/asset-system-service/docs"
 	"github.com/gofiber/contrib/v3/swaggerui"
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/cors"
 )
 
 const serviceName = "asset-system-service"
@@ -25,6 +26,13 @@ type Dependencies struct {
 // NewRouter builds the HTTP router for the service.
 func NewRouter(dependencies Dependencies) *fiber.App {
 	app := fiber.New()
+
+	// CORS middleware to allow cross-origin requests from Frontend on Vercel
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: []string{"*"},
+		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+	}))
 
 	// Official Fiber v3 Swagger UI middleware from github.com/gofiber/contrib/v3/swaggerui
 	app.Use(swaggerui.New(swaggerui.Config{
