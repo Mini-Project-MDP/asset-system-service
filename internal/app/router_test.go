@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,8 +22,8 @@ func (database stubDatabase) PingContext(context.Context) error {
 func TestHealth(t *testing.T) {
 	response := performRequest(t, stubDatabase{}, "/health")
 
-	if response.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.StatusCode)
 	}
 
 	body := decodeResponse(t, response)
@@ -34,8 +35,8 @@ func TestHealth(t *testing.T) {
 func TestReadyWhenDatabaseIsConnected(t *testing.T) {
 	response := performRequest(t, stubDatabase{}, "/ready")
 
-	if response.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.StatusCode)
 	}
 
 	body := decodeResponse(t, response)
@@ -47,8 +48,8 @@ func TestReadyWhenDatabaseIsConnected(t *testing.T) {
 func TestReadyWhenDatabaseIsUnavailable(t *testing.T) {
 	response := performRequest(t, stubDatabase{pingError: errors.New("connection failed")}, "/ready")
 
-	if response.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, response.Code)
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, response.StatusCode)
 	}
 
 	body := decodeResponse(t, response)
@@ -60,25 +61,36 @@ func TestReadyWhenDatabaseIsUnavailable(t *testing.T) {
 	}
 }
 
-func performRequest(t *testing.T, database DatabasePinger, path string) *httptest.ResponseRecorder {
+func performRequest(t *testing.T, database DatabasePinger, path string) *http.Response {
 	t.Helper()
 
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, path, nil)
-	NewRouter(Dependencies{
+	app := NewRouter(Dependencies{
 		Database:            database,
 		DatabasePingTimeout: time.Second,
-	}).ServeHTTP(response, request)
+	})
+
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	response, err := app.Test(request, -1)
+	if err != nil {
+		t.Fatalf("app.Test failed: %v", err)
+	}
 
 	return response
 }
 
-func decodeResponse(t *testing.T, response *httptest.ResponseRecorder) map[string]string {
+func decodeResponse(t *testing.T, response *http.Response) map[string]string {
 	t.Helper()
 
+	defer response.Body.Close()
+	bodyBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+
 	var body map[string]string
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	return body
 }
+

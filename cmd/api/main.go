@@ -3,11 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log"
-	"net"
-	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
@@ -46,22 +43,14 @@ func run() error {
 	}
 	defer closeDatabase(databaseConnection)
 
-	server := &http.Server{
-		Addr: applicationConfig.Address(),
-		Handler: app.NewRouter(app.Dependencies{
-			Database:            databaseConnection,
-			DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
-		}),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	listener, err := net.Listen("tcp", applicationConfig.Address())
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", applicationConfig.Address(), err)
-	}
+	fiberApp := app.NewRouter(app.Dependencies{
+		Database:            databaseConnection,
+		DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
+	})
 
 	serverErrors := make(chan error, 1)
 	go func() {
-		serverErrors <- server.Serve(listener)
+		serverErrors <- fiberApp.Listen(applicationConfig.Address())
 	}()
 
 	log.Printf(
@@ -79,9 +68,7 @@ func run() error {
 
 	select {
 	case err := <-serverErrors:
-		if !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("serve HTTP: %w", err)
-		}
+		return fmt.Errorf("serve HTTP: %w", err)
 	case <-shutdownSignal.Done():
 		log.Print("shutdown signal received")
 	}
@@ -89,7 +76,7 @@ func run() error {
 	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancelShutdown()
 
-	if err := server.Shutdown(shutdownContext); err != nil {
+	if err := fiberApp.ShutdownWithContext(shutdownContext); err != nil {
 		return fmt.Errorf("shutdown HTTP server: %w", err)
 	}
 
@@ -101,3 +88,4 @@ func closeDatabase(databaseConnection *sql.DB) {
 		log.Printf("close database: %v", err)
 	}
 }
+

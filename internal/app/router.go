@@ -2,10 +2,9 @@ package app
 
 import (
 	"context"
-	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 )
 
 const serviceName = "asset-system-service"
@@ -22,40 +21,42 @@ type Dependencies struct {
 }
 
 // NewRouter builds the HTTP router for the service.
-func NewRouter(dependencies Dependencies) *gin.Engine {
-	router := gin.Default()
+func NewRouter(dependencies Dependencies) *fiber.App {
+	app := fiber.New(fiber.Config{
+		DisableStartupMessage: true,
+	})
 
-	router.GET("/health", health)
-	router.GET("/ready", ready(dependencies))
+	app.Get("/health", health)
+	app.Get("/ready", ready(dependencies))
 
-	return router
+	return app
 }
 
-func health(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+func health(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"status":  "ok",
 		"service": serviceName,
 	})
 }
 
-func ready(dependencies Dependencies) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), dependencies.DatabasePingTimeout)
+func ready(dependencies Dependencies) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		ctx, cancel := context.WithTimeout(c.UserContext(), dependencies.DatabasePingTimeout)
 		defer cancel()
 
 		if err := dependencies.Database.PingContext(ctx); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 				"status":   "unavailable",
 				"service":  serviceName,
 				"database": "unavailable",
 			})
-			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"status":   "ready",
 			"service":  serviceName,
 			"database": "connected",
 		})
 	}
 }
+
