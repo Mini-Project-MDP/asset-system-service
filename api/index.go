@@ -19,17 +19,17 @@ import (
 )
 
 var (
-	once        sync.Once
+	mu          sync.Mutex
+	initialized bool
 	httpHandler http.HandlerFunc
 	initErr     error
 	db          *sql.DB
 )
 
-func initialize() {
+func initialize() error {
 	applicationConfig, err := config.Load()
 	if err != nil {
-		initErr = fmt.Errorf("load config: %w", err)
-		return
+		return fmt.Errorf("load config: %w", err)
 	}
 
 	databaseContext, cancelDatabaseContext := context.WithTimeout(
@@ -44,8 +44,7 @@ func initialize() {
 		applicationConfig.DatabaseAuthToken,
 	)
 	if err != nil {
-		initErr = fmt.Errorf("connect database: %w", err)
-		return
+		return fmt.Errorf("connect database: %w", err)
 	}
 	db = databaseConnection
 
@@ -66,17 +65,29 @@ func initialize() {
 	})
 
 	httpHandler = adaptor.FiberApp(fiberApp)
+	return nil
 }
 
 // Handler is the serverless entrypoint for Vercel deployments.
 func Handler(w http.ResponseWriter, r *http.Request) {
-	once.Do(initialize)
+	mu.Lock()
+	if !initialized {
+		initErr = initialize()
+		if initErr == nil {
+			initialized = true
+		}
+	}
+	err := initErr
+	h := httpHandler
+	mu.Unlock()
 
-	if initErr != nil {
-		log.Printf("Vercel handler init error: %v", initErr)
-		http.Error(w, fmt.Sprintf("Initialization error: %v", initErr), http.StatusInternalServerError)
+	if err != nil {
+		log.Printf("Vercel handler init error: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"success":false,"error":"Initialization error: %v"}`+"\n", err)
 		return
 	}
 
-	httpHandler(w, r)
+	h(w, r)
 }
