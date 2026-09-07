@@ -51,9 +51,10 @@ type environmentLookup func(string) (string, bool)
 func loadFromEnvironment(lookup environmentLookup) (Config, error) {
 	appEnvironment := valueOrDefault(lookup, "APP_ENV", defaultAppEnvironment)
 
-	appPort, err := parsePort(valueOrDefault(lookup, "APP_PORT", strconv.Itoa(defaultAppPort)))
+	portStr := valueOrDefault(lookup, "PORT", valueOrDefault(lookup, "APP_PORT", strconv.Itoa(defaultAppPort)))
+	appPort, err := parsePort(portStr)
 	if err != nil {
-		return Config{}, err
+		return Config{}, fmt.Errorf("PORT/APP_PORT: %w", err)
 	}
 
 	databaseURL, err := requiredValue(lookup, "TURSO_DATABASE_URL")

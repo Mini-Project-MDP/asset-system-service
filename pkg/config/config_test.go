@@ -31,6 +31,26 @@ func TestLoadFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnvironmentWithPort(t *testing.T) {
+	values := map[string]string{
+		"TURSO_DATABASE_URL": "libsql://example.turso.io",
+		"TURSO_AUTH_TOKEN":   "test-token",
+		"PORT":               "40399",
+	}
+
+	config, err := loadFromEnvironment(mapLookup(values))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if config.AppPort != 40399 {
+		t.Fatalf("expected port 40399, got %d", config.AppPort)
+	}
+	if config.Address() != ":40399" {
+		t.Fatalf("expected address :40399, got %s", config.Address())
+	}
+}
+
 func TestLoadFromEnvironmentRequiresDatabaseConfiguration(t *testing.T) {
 	tests := []struct {
 		name     string
