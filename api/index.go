@@ -8,9 +8,13 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/app"
+	appHttp "github.com/Mini-Project-MDP/asset-system-service/internal/delivery/http"
+	appHandler "github.com/Mini-Project-MDP/asset-system-service/internal/delivery/http/handler"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/repository"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/service"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/config"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/infrastructure/database"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/database"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/jwt"
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
 )
 
@@ -45,9 +49,20 @@ func initialize() {
 	}
 	db = databaseConnection
 
-	fiberApp := app.NewRouter(app.Dependencies{
+	tokenManager := jwt.NewTokenManager(applicationConfig.JWTSecret, applicationConfig.JWTExpiryDuration)
+	authRepo := repository.NewAuthRepository(db)
+	authService := service.NewAuthService(authRepo, tokenManager)
+	authHandlerInstance := appHandler.NewAuthHandler(authService)
+	userHandlerInstance := appHandler.NewUserHandler(authService)
+
+	fiberApp := appHttp.NewRouter(appHttp.Dependencies{
 		Database:            db,
 		DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
+		TokenManager:        tokenManager,
+		Handlers: appHttp.Handlers{
+			Auth: authHandlerInstance,
+			User: userHandlerInstance,
+		},
 	})
 
 	httpHandler = adaptor.FiberApp(fiberApp)

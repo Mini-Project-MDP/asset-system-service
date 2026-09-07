@@ -1,6 +1,9 @@
-package auth
+package domain
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // LoginRequest contains payload for user login.
 type LoginRequest struct {
@@ -95,4 +98,35 @@ type AssignPermissionRequest struct {
 type UpdateSettingsRequest struct {
 	Theme              string `json:"theme"`
 	EmailNotifications bool   `json:"email_notifications"`
+}
+
+// AuthRepository defines data access methods for authentication & user authorization.
+type AuthRepository interface {
+	GetUserByEmailOrUsername(ctx context.Context, identifier string) (*User, error)
+	GetUserByID(ctx context.Context, userID string) (*User, error)
+	GetUserRoles(ctx context.Context, userID string) ([]RoleDto, error)
+	GetUserPermissions(ctx context.Context, userID string) ([]string, error)
+	GetUserSettings(ctx context.Context, userID string) (*UserSettingDto, error)
+	UpdateUserSettings(ctx context.Context, userID string, settings UpdateSettingsRequest) error
+	UpdateMasterUserStatus(ctx context.Context, userID string, isMaster bool) error
+	GetRoles(ctx context.Context) ([]RoleDto, error)
+	CreateRole(ctx context.Context, req CreateRoleRequest) (*RoleDto, error)
+	GetPermissions(ctx context.Context) ([]PermissionDto, error)
+	AssignPermissionsToRole(ctx context.Context, roleID string, permissionIDs []string) error
+	AssignRolesToUser(ctx context.Context, userID string, roleIDs []string) error
+	GetUsers(ctx context.Context) ([]UserProfile, error)
+}
+
+// AuthService defines business logic interface for Auth domain.
+type AuthService interface {
+	Login(ctx context.Context, req LoginRequest) (*LoginResponse, error)
+	GetCurrentUserProfile(ctx context.Context, userID string) (*UserProfile, error)
+	UpdateUserSettings(ctx context.Context, userID string, req UpdateSettingsRequest) error
+	UpdateMasterUserStatus(ctx context.Context, userID string, isMaster bool) error
+	GetRoles(ctx context.Context) ([]RoleDto, error)
+	CreateRole(ctx context.Context, req CreateRoleRequest) (*RoleDto, error)
+	GetPermissions(ctx context.Context) ([]PermissionDto, error)
+	AssignPermissionsToRole(ctx context.Context, roleID string, permissionIDs []string) error
+	AssignRolesToUser(ctx context.Context, userID string, roleIDs []string) error
+	GetUsers(ctx context.Context) ([]UserProfile, error)
 }

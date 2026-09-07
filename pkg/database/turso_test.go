@@ -9,9 +9,9 @@ import (
 func TestOpenTursoRejectsUnsupportedURLWithoutLeakingToken(t *testing.T) {
 	const secret = "do-not-leak-this-token"
 
-	database, err := OpenTurso(context.Background(), "postgres://example.com/database", secret)
-	if database != nil {
-		_ = database.Close()
+	db, err := OpenTurso(context.Background(), "postgres://example.com/database", secret)
+	if db != nil {
+		_ = db.Close()
 		t.Fatal("expected no database handle")
 	}
 	if err == nil {

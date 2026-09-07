@@ -1,4 +1,4 @@
-package auth
+package repository
 
 import (
 	"context"
@@ -6,25 +6,27 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Mini-Project-MDP/asset-system-service/internal/domain"
 	"github.com/google/uuid"
 )
 
-type Repository struct {
+type authRepository struct {
 	db *sql.DB
 }
 
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+// NewAuthRepository creates a new instance of domain.AuthRepository.
+func NewAuthRepository(db *sql.DB) domain.AuthRepository {
+	return &authRepository{db: db}
 }
 
-func (r *Repository) GetUserByEmailOrEmployeeNo(ctx context.Context, identifier string) (*User, error) {
+func (r *authRepository) GetUserByEmailOrUsername(ctx context.Context, identifier string) (*domain.User, error) {
 	query := `
 		SELECT id, employee_no, name, email, password_hash, status, is_master, version, created_at, updated_at
 		FROM users
 		WHERE email = ? OR employee_no = ?
 		LIMIT 1
 	`
-	var u User
+	var u domain.User
 	var isMasterInt int
 	err := r.db.QueryRowContext(ctx, query, identifier, identifier).Scan(
 		&u.ID, &u.EmployeeNo, &u.Name, &u.Email, &u.PasswordHash, &u.Status, &isMasterInt, &u.Version, &u.CreatedAt, &u.UpdatedAt,
@@ -39,14 +41,14 @@ func (r *Repository) GetUserByEmailOrEmployeeNo(ctx context.Context, identifier 
 	return &u, nil
 }
 
-func (r *Repository) GetUserByID(ctx context.Context, id string) (*User, error) {
+func (r *authRepository) GetUserByID(ctx context.Context, id string) (*domain.User, error) {
 	query := `
 		SELECT id, employee_no, name, email, password_hash, status, is_master, version, created_at, updated_at
 		FROM users
 		WHERE id = ?
 		LIMIT 1
 	`
-	var u User
+	var u domain.User
 	var isMasterInt int
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&u.ID, &u.EmployeeNo, &u.Name, &u.Email, &u.PasswordHash, &u.Status, &isMasterInt, &u.Version, &u.CreatedAt, &u.UpdatedAt,
@@ -61,7 +63,7 @@ func (r *Repository) GetUserByID(ctx context.Context, id string) (*User, error) 
 	return &u, nil
 }
 
-func (r *Repository) GetUserRoles(ctx context.Context, userID string) ([]RoleDto, error) {
+func (r *authRepository) GetUserRoles(ctx context.Context, userID string) ([]domain.RoleDto, error) {
 	query := `
 		SELECT r.id, r.code, r.name, r.role_type, r.approval_rank, r.is_active
 		FROM roles r
@@ -74,9 +76,9 @@ func (r *Repository) GetUserRoles(ctx context.Context, userID string) ([]RoleDto
 	}
 	defer rows.Close()
 
-	var roles []RoleDto
+	var roles []domain.RoleDto
 	for rows.Next() {
-		var role RoleDto
+		var role domain.RoleDto
 		var isActiveInt int
 		if err := rows.Scan(&role.ID, &role.Code, &role.Name, &role.RoleType, &role.ApprovalRank, &isActiveInt); err != nil {
 			return nil, err
@@ -87,7 +89,7 @@ func (r *Repository) GetUserRoles(ctx context.Context, userID string) ([]RoleDto
 	return roles, nil
 }
 
-func (r *Repository) GetUserPermissions(ctx context.Context, userID string) ([]string, error) {
+func (r *authRepository) GetUserPermissions(ctx context.Context, userID string) ([]string, error) {
 	query := `
 		SELECT DISTINCT p.code
 		FROM permissions p
@@ -112,14 +114,14 @@ func (r *Repository) GetUserPermissions(ctx context.Context, userID string) ([]s
 	return permissions, nil
 }
 
-func (r *Repository) GetUserSettings(ctx context.Context, userID string) (*UserSettingDto, error) {
+func (r *authRepository) GetUserSettings(ctx context.Context, userID string) (*domain.UserSettingDto, error) {
 	query := `SELECT theme, email_notifications FROM user_settings WHERE user_id = ? LIMIT 1`
-	var settings UserSettingDto
+	var settings domain.UserSettingDto
 	var emailNotifInt int
 	err := r.db.QueryRowContext(ctx, query, userID).Scan(&settings.Theme, &emailNotifInt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return &UserSettingDto{Theme: "light", EmailNotifications: true}, nil
+			return &domain.UserSettingDto{Theme: "light", EmailNotifications: true}, nil
 		}
 		return nil, fmt.Errorf("query user settings: %w", err)
 	}
@@ -127,7 +129,7 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID string) (*UserS
 	return &settings, nil
 }
 
-func (r *Repository) UpdateUserSettings(ctx context.Context, userID string, req UpdateSettingsRequest) error {
+func (r *authRepository) UpdateUserSettings(ctx context.Context, userID string, req domain.UpdateSettingsRequest) error {
 	emailNotifInt := 0
 	if req.EmailNotifications {
 		emailNotifInt = 1
@@ -148,7 +150,7 @@ func (r *Repository) UpdateUserSettings(ctx context.Context, userID string, req 
 	return nil
 }
 
-func (r *Repository) SetMasterUserStatus(ctx context.Context, userID string, isMaster bool) error {
+func (r *authRepository) UpdateMasterUserStatus(ctx context.Context, userID string, isMaster bool) error {
 	isMasterInt := 0
 	if isMaster {
 		isMasterInt = 1
@@ -165,7 +167,7 @@ func (r *Repository) SetMasterUserStatus(ctx context.Context, userID string, isM
 	return nil
 }
 
-func (r *Repository) GetAllRoles(ctx context.Context) ([]RoleDto, error) {
+func (r *authRepository) GetRoles(ctx context.Context) ([]domain.RoleDto, error) {
 	query := `SELECT id, code, name, role_type, approval_rank, is_active FROM roles ORDER BY approval_rank DESC`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
@@ -173,9 +175,9 @@ func (r *Repository) GetAllRoles(ctx context.Context) ([]RoleDto, error) {
 	}
 	defer rows.Close()
 
-	var roles []RoleDto
+	var roles []domain.RoleDto
 	for rows.Next() {
-		var role RoleDto
+		var role domain.RoleDto
 		var isActiveInt int
 		if err := rows.Scan(&role.ID, &role.Code, &role.Name, &role.RoleType, &role.ApprovalRank, &isActiveInt); err != nil {
 			return nil, err
@@ -183,7 +185,7 @@ func (r *Repository) GetAllRoles(ctx context.Context) ([]RoleDto, error) {
 		role.IsActive = isActiveInt == 1
 
 		// Fetch permissions for each role
-		perms, err := r.GetRolePermissions(ctx, role.ID)
+		perms, err := r.getRolePermissions(ctx, role.ID)
 		if err == nil {
 			role.Permissions = perms
 		}
@@ -192,7 +194,7 @@ func (r *Repository) GetAllRoles(ctx context.Context) ([]RoleDto, error) {
 	return roles, nil
 }
 
-func (r *Repository) GetRolePermissions(ctx context.Context, roleID string) ([]PermissionDto, error) {
+func (r *authRepository) getRolePermissions(ctx context.Context, roleID string) ([]domain.PermissionDto, error) {
 	query := `
 		SELECT p.id, p.code, p.name, COALESCE(p.description, '')
 		FROM permissions p
@@ -205,9 +207,9 @@ func (r *Repository) GetRolePermissions(ctx context.Context, roleID string) ([]P
 	}
 	defer rows.Close()
 
-	var perms []PermissionDto
+	var perms []domain.PermissionDto
 	for rows.Next() {
-		var p PermissionDto
+		var p domain.PermissionDto
 		if err := rows.Scan(&p.ID, &p.Code, &p.Name, &p.Description); err != nil {
 			return nil, err
 		}
@@ -216,7 +218,7 @@ func (r *Repository) GetRolePermissions(ctx context.Context, roleID string) ([]P
 	return perms, nil
 }
 
-func (r *Repository) CreateRole(ctx context.Context, req CreateRoleRequest) (*RoleDto, error) {
+func (r *authRepository) CreateRole(ctx context.Context, req domain.CreateRoleRequest) (*domain.RoleDto, error) {
 	roleID := "role_" + uuid.New().String()[:8]
 	if req.RoleType == "" {
 		req.RoleType = "SYSTEM"
@@ -230,7 +232,7 @@ func (r *Repository) CreateRole(ctx context.Context, req CreateRoleRequest) (*Ro
 		return nil, fmt.Errorf("insert role: %w", err)
 	}
 
-	return &RoleDto{
+	return &domain.RoleDto{
 		ID:           roleID,
 		Code:         req.Code,
 		Name:         req.Name,
@@ -240,7 +242,7 @@ func (r *Repository) CreateRole(ctx context.Context, req CreateRoleRequest) (*Ro
 	}, nil
 }
 
-func (r *Repository) GetAllPermissions(ctx context.Context) ([]PermissionDto, error) {
+func (r *authRepository) GetPermissions(ctx context.Context) ([]domain.PermissionDto, error) {
 	query := `SELECT id, code, name, COALESCE(description, '') FROM permissions ORDER BY code ASC`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
@@ -248,9 +250,9 @@ func (r *Repository) GetAllPermissions(ctx context.Context) ([]PermissionDto, er
 	}
 	defer rows.Close()
 
-	var permissions []PermissionDto
+	var permissions []domain.PermissionDto
 	for rows.Next() {
-		var p PermissionDto
+		var p domain.PermissionDto
 		if err := rows.Scan(&p.ID, &p.Code, &p.Name, &p.Description); err != nil {
 			return nil, err
 		}
@@ -259,7 +261,7 @@ func (r *Repository) GetAllPermissions(ctx context.Context) ([]PermissionDto, er
 	return permissions, nil
 }
 
-func (r *Repository) AssignPermissionsToRole(ctx context.Context, roleID string, permissionIDs []string) error {
+func (r *authRepository) AssignPermissionsToRole(ctx context.Context, roleID string, permissionIDs []string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -282,7 +284,7 @@ func (r *Repository) AssignPermissionsToRole(ctx context.Context, roleID string,
 	return tx.Commit()
 }
 
-func (r *Repository) AssignRolesToUser(ctx context.Context, userID string, roleIDs []string) error {
+func (r *authRepository) AssignRolesToUser(ctx context.Context, userID string, roleIDs []string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -310,7 +312,7 @@ func (r *Repository) AssignRolesToUser(ctx context.Context, userID string, roleI
 	return tx.Commit()
 }
 
-func (r *Repository) GetAllUsers(ctx context.Context) ([]UserProfile, error) {
+func (r *authRepository) GetUsers(ctx context.Context) ([]domain.UserProfile, error) {
 	query := `SELECT id, employee_no, name, email, status, is_master FROM users ORDER BY name ASC`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
@@ -318,9 +320,9 @@ func (r *Repository) GetAllUsers(ctx context.Context) ([]UserProfile, error) {
 	}
 	defer rows.Close()
 
-	var profiles []UserProfile
+	var profiles []domain.UserProfile
 	for rows.Next() {
-		var p UserProfile
+		var p domain.UserProfile
 		var isMasterInt int
 		if err := rows.Scan(&p.ID, &p.EmployeeNo, &p.Name, &p.Email, &p.Status, &isMasterInt); err != nil {
 			return nil, err

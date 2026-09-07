@@ -1,35 +1,31 @@
-package auth
+package middleware
 
 import (
 	"strings"
 
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/jwt"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/response"
 	"github.com/gofiber/fiber/v3"
 )
 
 const UserContextKey = "user"
 
 // JWTAuth returns a Fiber middleware that validates JWT Bearer tokens.
-func JWTAuth(tm *TokenManager) fiber.Handler {
+func JWTAuth(tm *jwt.TokenManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Missing Authorization header",
-			})
+			return response.Error(c, fiber.StatusUnauthorized, "Missing Authorization header")
 		}
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid Authorization header format",
-			})
+			return response.Error(c, fiber.StatusUnauthorized, "Invalid Authorization header format")
 		}
 
 		claims, err := tm.ValidateToken(parts[1])
 		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Unauthorized: " + err.Error(),
-			})
+			return response.Error(c, fiber.StatusUnauthorized, "Unauthorized: "+err.Error())
 		}
 
 		c.Locals(UserContextKey, claims)
@@ -42,11 +38,9 @@ func JWTAuth(tm *TokenManager) fiber.Handler {
 func RequirePermission(permissionCode string) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		val := c.Locals(UserContextKey)
-		claims, ok := val.(*UserClaims)
+		claims, ok := val.(*jwt.UserClaims)
 		if !ok || claims == nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Unauthorized context",
-			})
+			return response.Error(c, fiber.StatusUnauthorized, "Unauthorized context")
 		}
 
 		if claims.IsMaster {
@@ -59,9 +53,7 @@ func RequirePermission(permissionCode string) fiber.Handler {
 			}
 		}
 
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "Forbidden: permission '" + permissionCode + "' required",
-		})
+		return response.Error(c, fiber.StatusForbidden, "Forbidden: permission '"+permissionCode+"' required")
 	}
 }
 
@@ -69,17 +61,13 @@ func RequirePermission(permissionCode string) fiber.Handler {
 func RequireMasterUser() fiber.Handler {
 	return func(c fiber.Ctx) error {
 		val := c.Locals(UserContextKey)
-		claims, ok := val.(*UserClaims)
+		claims, ok := val.(*jwt.UserClaims)
 		if !ok || claims == nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Unauthorized context",
-			})
+			return response.Error(c, fiber.StatusUnauthorized, "Unauthorized context")
 		}
 
 		if !claims.IsMaster {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error": "Forbidden: Master user status required",
-			})
+			return response.Error(c, fiber.StatusForbidden, "Forbidden: Master user status required")
 		}
 
 		return c.Next()

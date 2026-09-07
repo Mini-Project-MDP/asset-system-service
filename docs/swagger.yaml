@@ -1,0 +1,557 @@
+basePath: /
+definitions:
+  domain.AssignPermissionRequest:
+    properties:
+      permission_ids:
+        items:
+          type: string
+        type: array
+    type: object
+  domain.AssignRoleRequest:
+    properties:
+      role_ids:
+        items:
+          type: string
+        type: array
+    type: object
+  domain.CreateRoleRequest:
+    properties:
+      approval_rank:
+        type: integer
+      code:
+        type: string
+      name:
+        type: string
+      role_type:
+        type: string
+    required:
+    - code
+    - name
+    type: object
+  domain.LoginRequest:
+    properties:
+      password:
+        type: string
+      username_or_email:
+        type: string
+    required:
+    - password
+    - username_or_email
+    type: object
+  domain.LoginResponse:
+    properties:
+      access_token:
+        type: string
+      expires_at:
+        type: string
+      token_type:
+        type: string
+      user:
+        $ref: '#/definitions/domain.UserProfile'
+    type: object
+  domain.PermissionDto:
+    properties:
+      code:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  domain.RoleDto:
+    properties:
+      approval_rank:
+        type: integer
+      code:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      name:
+        type: string
+      permissions:
+        items:
+          $ref: '#/definitions/domain.PermissionDto'
+        type: array
+      role_type:
+        type: string
+    type: object
+  domain.UpdateMasterUserRequest:
+    properties:
+      is_master:
+        type: boolean
+    type: object
+  domain.UpdateSettingsRequest:
+    properties:
+      email_notifications:
+        type: boolean
+      theme:
+        type: string
+    type: object
+  domain.UserProfile:
+    properties:
+      email:
+        type: string
+      employee_no:
+        type: string
+      id:
+        type: string
+      is_master:
+        type: boolean
+      name:
+        type: string
+      permissions:
+        items:
+          type: string
+        type: array
+      roles:
+        items:
+          $ref: '#/definitions/domain.RoleDto'
+        type: array
+      settings:
+        $ref: '#/definitions/domain.UserSettingDto'
+      status:
+        type: string
+    type: object
+  domain.UserSettingDto:
+    properties:
+      email_notifications:
+        type: boolean
+      theme:
+        type: string
+    type: object
+  response.Response:
+    properties:
+      data: {}
+      error: {}
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
+info:
+  contact: {}
+  description: Asset Management System Backend Microservice built with Go Fiber.
+  title: Asset System Service API
+  version: "1.0"
+paths:
+  /api/v1/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticates user credentials and returns JWT access token along
+        with user profile
+      parameters:
+      - description: Login Credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/domain.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/domain.LoginResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: User login
+      tags:
+      - Auth
+  /api/v1/me:
+    get:
+      description: Retrieves profile and permissions of the currently authenticated
+        user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/domain.UserProfile'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get current user profile
+      tags:
+      - User Profile
+  /api/v1/me/settings:
+    put:
+      consumes:
+      - application/json
+      description: Updates preferences (theme, email notifications) for the current
+        user
+      parameters:
+      - description: User Settings Payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/domain.UpdateSettingsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Update user settings
+      tags:
+      - User Profile
+  /api/v1/permissions:
+    get:
+      description: Retrieves list of all available system permissions
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/domain.PermissionDto'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get all permissions
+      tags:
+      - Roles & Permissions
+  /api/v1/roles:
+    get:
+      description: Retrieves all system roles and their assigned permissions
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/domain.RoleDto'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get all roles
+      tags:
+      - Roles & Permissions
+    post:
+      consumes:
+      - application/json
+      description: Creates a new custom role in the system
+      parameters:
+      - description: Create Role Payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/domain.CreateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/domain.RoleDto'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Create a new role
+      tags:
+      - Roles & Permissions
+  /api/v1/roles/{id}/permissions:
+    post:
+      consumes:
+      - application/json
+      description: Replaces assigned permissions for a specific role
+      parameters:
+      - description: Role ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Assign Permissions Payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/domain.AssignPermissionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Assign permissions to role
+      tags:
+      - Roles & Permissions
+  /api/v1/users:
+    get:
+      description: Retrieves list of all user profiles in the system
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/domain.UserProfile'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Get all users
+      tags:
+      - Users
+  /api/v1/users/{id}/master:
+    post:
+      consumes:
+      - application/json
+      description: Designates or revokes master user status for a target user
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Master User Payload
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/domain.UpdateMasterUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Toggle Master User status
+      tags:
+      - Users
+  /api/v1/users/{id}/roles:
+    post:
+      consumes:
+      - application/json
+      description: Assigns a list of roles to a target user
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Assign Roles Payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/domain.AssignRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: Assign roles to user
+      tags:
+      - Users
+  /health:
+    get:
+      description: Returns operational status of the service
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Service health status
+      tags:
+      - System
+  /ready:
+    get:
+      description: Verifies database connectivity and readiness of the service
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Service readiness status
+      tags:
+      - System
+securityDefinitions:
+  BearerAuth:
+    description: Type 'Bearer ' followed by your JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

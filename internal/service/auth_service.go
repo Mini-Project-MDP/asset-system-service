@@ -1,31 +1,33 @@
-package auth
+package service
 
 import (
 	"context"
 	"errors"
 	"fmt"
 
-	infraAuth "github.com/Mini-Project-MDP/asset-system-service/pkg/infrastructure/auth"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/domain"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/jwt"
 )
 
-type Service struct {
-	repo         *Repository
-	tokenManager *infraAuth.TokenManager
+type authService struct {
+	repo         domain.AuthRepository
+	tokenManager *jwt.TokenManager
 }
 
-func NewService(repo *Repository, tm *infraAuth.TokenManager) *Service {
-	return &Service{
+// NewAuthService creates a new instance of domain.AuthService.
+func NewAuthService(repo domain.AuthRepository, tm *jwt.TokenManager) domain.AuthService {
+	return &authService{
 		repo:         repo,
 		tokenManager: tm,
 	}
 }
 
-func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResponse, error) {
+func (s *authService) Login(ctx context.Context, req domain.LoginRequest) (*domain.LoginResponse, error) {
 	if req.UsernameOrEmail == "" || req.Password == "" {
 		return nil, errors.New("username/email and password are required")
 	}
 
-	user, err := s.repo.GetUserByEmailOrEmployeeNo(ctx, req.UsernameOrEmail)
+	user, err := s.repo.GetUserByEmailOrUsername(ctx, req.UsernameOrEmail)
 	if err != nil {
 		return nil, fmt.Errorf("database query error: %w", err)
 	}
@@ -37,7 +39,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResponse, 
 		return nil, errors.New("user account is inactive or disabled")
 	}
 
-	if !infraAuth.CheckPasswordHash(req.Password, user.PasswordHash) {
+	if !jwt.CheckPasswordHash(req.Password, user.PasswordHash) {
 		return nil, errors.New("invalid credentials")
 	}
 
@@ -53,7 +55,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResponse, 
 
 	settings, err := s.repo.GetUserSettings(ctx, user.ID)
 	if err != nil {
-		settings = &UserSettingDto{Theme: "light", EmailNotifications: true}
+		settings = &domain.UserSettingDto{Theme: "light", EmailNotifications: true}
 	}
 
 	var roleCodes []string
@@ -74,7 +76,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResponse, 
 		return nil, fmt.Errorf("generate authentication token: %w", err)
 	}
 
-	profile := UserProfile{
+	profile := domain.UserProfile{
 		ID:          user.ID,
 		EmployeeNo:  user.EmployeeNo,
 		Name:        user.Name,
@@ -86,7 +88,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResponse, 
 		Settings:    settings,
 	}
 
-	return &LoginResponse{
+	return &domain.LoginResponse{
 		AccessToken: tokenStr,
 		TokenType:   "Bearer",
 		ExpiresAt:   expiresAt,
@@ -94,7 +96,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResponse, 
 	}, nil
 }
 
-func (s *Service) GetCurrentUserProfile(ctx context.Context, userID string) (*UserProfile, error) {
+func (s *authService) GetCurrentUserProfile(ctx context.Context, userID string) (*domain.UserProfile, error) {
 	user, err := s.repo.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -115,10 +117,10 @@ func (s *Service) GetCurrentUserProfile(ctx context.Context, userID string) (*Us
 
 	settings, err := s.repo.GetUserSettings(ctx, user.ID)
 	if err != nil {
-		settings = &UserSettingDto{Theme: "light", EmailNotifications: true}
+		settings = &domain.UserSettingDto{Theme: "light", EmailNotifications: true}
 	}
 
-	return &UserProfile{
+	return &domain.UserProfile{
 		ID:          user.ID,
 		EmployeeNo:  user.EmployeeNo,
 		Name:        user.Name,
@@ -131,37 +133,37 @@ func (s *Service) GetCurrentUserProfile(ctx context.Context, userID string) (*Us
 	}, nil
 }
 
-func (s *Service) UpdateMasterUserStatus(ctx context.Context, userID string, isMaster bool) error {
-	return s.repo.SetMasterUserStatus(ctx, userID, isMaster)
+func (s *authService) UpdateMasterUserStatus(ctx context.Context, userID string, isMaster bool) error {
+	return s.repo.UpdateMasterUserStatus(ctx, userID, isMaster)
 }
 
-func (s *Service) UpdateUserSettings(ctx context.Context, userID string, req UpdateSettingsRequest) error {
+func (s *authService) UpdateUserSettings(ctx context.Context, userID string, req domain.UpdateSettingsRequest) error {
 	return s.repo.UpdateUserSettings(ctx, userID, req)
 }
 
-func (s *Service) GetRoles(ctx context.Context) ([]RoleDto, error) {
-	return s.repo.GetAllRoles(ctx)
+func (s *authService) GetRoles(ctx context.Context) ([]domain.RoleDto, error) {
+	return s.repo.GetRoles(ctx)
 }
 
-func (s *Service) CreateRole(ctx context.Context, req CreateRoleRequest) (*RoleDto, error) {
+func (s *authService) CreateRole(ctx context.Context, req domain.CreateRoleRequest) (*domain.RoleDto, error) {
 	if req.Code == "" || req.Name == "" {
 		return nil, errors.New("role code and name are required")
 	}
 	return s.repo.CreateRole(ctx, req)
 }
 
-func (s *Service) GetPermissions(ctx context.Context) ([]PermissionDto, error) {
-	return s.repo.GetAllPermissions(ctx)
+func (s *authService) GetPermissions(ctx context.Context) ([]domain.PermissionDto, error) {
+	return s.repo.GetPermissions(ctx)
 }
 
-func (s *Service) AssignPermissionsToRole(ctx context.Context, roleID string, permissionIDs []string) error {
+func (s *authService) AssignPermissionsToRole(ctx context.Context, roleID string, permissionIDs []string) error {
 	return s.repo.AssignPermissionsToRole(ctx, roleID, permissionIDs)
 }
 
-func (s *Service) AssignRolesToUser(ctx context.Context, userID string, roleIDs []string) error {
+func (s *authService) AssignRolesToUser(ctx context.Context, userID string, roleIDs []string) error {
 	return s.repo.AssignRolesToUser(ctx, userID, roleIDs)
 }
 
-func (s *Service) GetUsers(ctx context.Context) ([]UserProfile, error) {
-	return s.repo.GetAllUsers(ctx)
+func (s *authService) GetUsers(ctx context.Context) ([]domain.UserProfile, error) {
+	return s.repo.GetUsers(ctx)
 }

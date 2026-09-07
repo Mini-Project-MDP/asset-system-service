@@ -3,6 +3,10 @@
 // @description Asset Management System Backend Microservice built with Go Fiber.
 // @host
 // @BasePath /
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type 'Bearer ' followed by your JWT token.
 package main
 
 import (
@@ -14,10 +18,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/app"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/delivery/http"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/delivery/http/handler"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/repository"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/service"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/config"
-	infraAuth "github.com/Mini-Project-MDP/asset-system-service/pkg/infrastructure/auth"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/infrastructure/database"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/database"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/jwt"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -55,13 +62,22 @@ func run() error {
 		log.Printf("Warning: Database migration & seed: %v", err)
 	}
 
-	tokenManager := infraAuth.NewTokenManager(applicationConfig.JWTSecret, applicationConfig.JWTExpiryDuration)
+	tokenManager := jwt.NewTokenManager(applicationConfig.JWTSecret, applicationConfig.JWTExpiryDuration)
 
-	fiberApp := app.NewRouter(app.Dependencies{
+	// Composition Root (Dependency Injection)
+	authRepo := repository.NewAuthRepository(databaseConnection)
+	authService := service.NewAuthService(authRepo, tokenManager)
+	authHandler := handler.NewAuthHandler(authService)
+	userHandler := handler.NewUserHandler(authService)
+
+	fiberApp := http.NewRouter(http.Dependencies{
 		Database:            databaseConnection,
-		SQLDB:               databaseConnection,
 		DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
 		TokenManager:        tokenManager,
+		Handlers: http.Handlers{
+			Auth: authHandler,
+			User: userHandler,
+		},
 	})
 
 	serverErrors := make(chan error, 1)

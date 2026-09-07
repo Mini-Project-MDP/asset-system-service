@@ -1,11 +1,11 @@
-package auth
+package jwt
 
 import (
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	golangJwt "github.com/golang-jwt/jwt/v5"
 )
 
 // UserClaims holds JWT claim data.
@@ -17,7 +17,7 @@ type UserClaims struct {
 	IsMaster    bool     `json:"is_master"`
 	Roles       []string `json:"roles"`
 	Permissions []string `json:"permissions"`
-	jwt.RegisteredClaims
+	golangJwt.RegisteredClaims
 }
 
 // TokenManager handles JWT token creation and validation.
@@ -45,14 +45,14 @@ func (tm *TokenManager) GenerateToken(userID, email, name, employeeNo string, is
 		IsMaster:    isMaster,
 		Roles:       roles,
 		Permissions: permissions,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expirationTime),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		RegisteredClaims: golangJwt.RegisteredClaims{
+			ExpiresAt: golangJwt.NewNumericDate(expirationTime),
+			IssuedAt:  golangJwt.NewNumericDate(time.Now()),
 			Subject:   userID,
 		},
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token := golangJwt.NewWithClaims(golangJwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(tm.secretKey)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("sign JWT token: %w", err)
@@ -63,8 +63,8 @@ func (tm *TokenManager) GenerateToken(userID, email, name, employeeNo string, is
 
 // ValidateToken parses and validates a JWT token string.
 func (tm *TokenManager) ValidateToken(tokenString string) (*UserClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &UserClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+	token, err := golangJwt.ParseWithClaims(tokenString, &UserClaims{}, func(token *golangJwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*golangJwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return tm.secretKey, nil

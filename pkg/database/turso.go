@@ -18,11 +18,11 @@ func OpenTurso(ctx context.Context, databaseURL, authToken string) (*sql.DB, err
 		return nil, fmt.Errorf("create Turso connector: %w", err)
 	}
 
-	database := sql.OpenDB(connector)
-	if err := database.PingContext(ctx); err != nil {
-		_ = database.Close()
+	db := sql.OpenDB(connector)
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("ping Turso database: %w", err)
 	}
 
-	return database, nil
+	return db, nil
 }
