@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Mini-Project-MDP/asset-system-service/internal/domain"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/domain"
 	"github.com/google/uuid"
 )
 

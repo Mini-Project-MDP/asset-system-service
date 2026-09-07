@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/Mini-Project-MDP/asset-system-service/docs"
-	"github.com/Mini-Project-MDP/asset-system-service/internal/delivery/http/handler"
-	"github.com/Mini-Project-MDP/asset-system-service/internal/delivery/http/middleware"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/delivery/http/handler"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/delivery/http/middleware"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/jwt"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/response"
 	"github.com/gofiber/contrib/v3/swaggerui"

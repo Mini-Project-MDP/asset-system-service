@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"github.com/Mini-Project-MDP/asset-system-service/internal/domain"
+	"github.com/Mini-Project-MDP/asset-system-service/pkg/domain"
 	"github.com/Mini-Project-MDP/asset-system-service/pkg/response"
 	"github.com/gofiber/fiber/v3"
 )

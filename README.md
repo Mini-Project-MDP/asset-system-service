@@ -100,17 +100,7 @@ Environment variable dari sistem/hosting memiliki prioritas lebih tinggi daripad
 ```text
 asset-system-service/
 ├── cmd/api/                         # Entry point; bootstrap dan shutdown
-├── internal/app/                    # Router dan dependency wiring
-├── internal/assetrequest/           # Pengajuan dan tracking request
-├── internal/approval/               # Approval task dan decision
-├── internal/workflow/               # Dynamic approval routing
-├── internal/fulfillment/            # Pemenuhan request yang disetujui
-├── internal/asset/                  # Registry dan lifecycle aset
-├── internal/masterdata/             # Outlet, distributor, region, tipe aset
-├── internal/notification/           # Notifikasi pengguna
-├── internal/audit/                  # Immutable audit trail
-├── internal/config/                 # Environment configuration
-├── internal/infrastructure/         # Adapter database, auth, dan logger
+├── pkg/                             # Shared packages, delivery, domain, repo, and services
 ├── migrations/                      # Perubahan schema SQL berurutan
 ├── seeds/                           # Data referensi development/test
 ├── docs/api/                        # API contract
