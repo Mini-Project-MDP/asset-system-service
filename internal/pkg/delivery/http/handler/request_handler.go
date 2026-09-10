@@ -26,6 +26,18 @@ type createRequest struct {
 	Priority      string `json:"priority"`
 }
 
+// List handles GET /api/v1/requests.
+// @Summary List asset requests
+// @Description Returns asset requests with optional text and category filters.
+// @Tags Requests
+// @Produce json
+// @Security BearerAuth
+// @Param q query string false "Search request ID, outlet, or requester"
+// @Param type query string false "Asset category filter"
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/requests [get]
 func (h *RequestHandler) List(c fiber.Ctx) error {
 	q, typ := strings.ToLower(c.Query("q")), c.Query("type")
 	rows, err := h.db.QueryContext(c.Context(), `SELECT ar.id, at.name, o.name, ar.quantity, ar.priority, d.name, ar.sales_division, ar.request_type, u.name, ar.created_at, ar.current_step, ar.fulfillment_step, ar.status FROM asset_requests ar JOIN users u ON u.id=ar.requester_id LEFT JOIN outlets o ON o.id=ar.outlet_id LEFT JOIN distributors d ON d.id=ar.distributor_id LEFT JOIN asset_types at ON at.id=ar.asset_type_id ORDER BY ar.created_at DESC`)
@@ -54,6 +66,17 @@ func (h *RequestHandler) List(c fiber.Ctx) error {
 	return response.Success(c, items)
 }
 
+// Detail handles GET /api/v1/requests/{id}.
+// @Summary Get asset request detail
+// @Description Returns a single asset request and its current workflow status.
+// @Tags Requests
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Request ID"
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Failure 404 {object} response.Response
+// @Router /api/v1/requests/{id} [get]
 func (h *RequestHandler) Detail(c fiber.Ctx) error {
 	c.Request().URI().SetPath("/api/requests")
 	// Detail reuses the list query and selects the requested item.
@@ -83,6 +106,19 @@ func (h *RequestHandler) listOne(c fiber.Ctx, id string) error {
 	return response.Success(c, requestMap(rid, category, outlet, qty, priority, distributor, division, reqType, by, created, step, fulfill, dbStatus))
 }
 
+// Create handles POST /api/v1/requests.
+// @Summary Create asset request
+// @Description Creates a new asset request.
+// @Tags Requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body createRequest true "Asset request payload"
+// @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/requests [post]
 func (h *RequestHandler) Create(c fiber.Ctx) error {
 	var req createRequest
 	if err := c.Bind().Body(&req); err != nil || req.Qty < 1 || req.Category == "" {
@@ -101,9 +137,40 @@ func (h *RequestHandler) Create(c fiber.Ctx) error {
 	return h.listOne(c, id)
 }
 
-func (h *RequestHandler) Approvals(c fiber.Ctx) error      { return h.List(c) }
+// Approvals handles GET /api/v1/approvals.
+// @Summary List approval requests
+// @Tags Requests
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Router /api/v1/approvals [get]
+func (h *RequestHandler) Approvals(c fiber.Ctx) error { return h.List(c) }
+
+// ApprovalDetail handles GET /api/v1/approvals/{id}.
+// @Summary Get approval request detail
+// @Tags Requests
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Request ID"
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Failure 404 {object} response.Response
+// @Router /api/v1/approvals/{id} [get]
 func (h *RequestHandler) ApprovalDetail(c fiber.Ctx) error { return h.Detail(c) }
 
+// ApprovalAction handles POST /api/v1/approvals/{id}/action.
+// @Summary Act on an approval request
+// @Tags Requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Request ID"
+// @Param request body map[string]string true "Approval action"
+// @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Router /api/v1/approvals/{id}/action [post]
 func (h *RequestHandler) ApprovalAction(c fiber.Ctx) error {
 	var body struct {
 		Action string `json:"action"`
@@ -132,7 +199,26 @@ func (h *RequestHandler) ApprovalAction(c fiber.Ctx) error {
 	return h.listOne(c, c.Params("id"))
 }
 
-func (h *RequestHandler) Fulfillment(c fiber.Ctx) error       { return h.List(c) }
+// Fulfillment handles GET /api/v1/fulfillment.
+// @Summary List fulfillment requests
+// @Tags Requests
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Router /api/v1/fulfillment [get]
+func (h *RequestHandler) Fulfillment(c fiber.Ctx) error { return h.List(c) }
+
+// FulfillmentDetail handles GET /api/v1/fulfillment/{id}.
+// @Summary Get fulfillment request detail
+// @Tags Requests
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Request ID"
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Failure 404 {object} response.Response
+// @Router /api/v1/fulfillment/{id} [get]
 func (h *RequestHandler) FulfillmentDetail(c fiber.Ctx) error { return h.Detail(c) }
 
 func (h *RequestHandler) SaveFulfillmentData(c fiber.Ctx) error {

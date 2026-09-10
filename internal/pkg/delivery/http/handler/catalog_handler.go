@@ -10,6 +10,16 @@ type CatalogHandler struct{ db *sql.DB }
 
 func NewCatalogHandler(db *sql.DB) *CatalogHandler { return &CatalogHandler{db: db} }
 
+// Outlets handles GET /api/v1/settings/outlets.
+// @Summary List active outlets
+// @Description Returns active outlet catalog entries.
+// @Tags Catalog
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/settings/outlets [get]
 func (h *CatalogHandler) Outlets(c fiber.Ctx) error {
 	rows, err := h.db.QueryContext(c.Context(), `SELECT o.id,o.code,o.name,COALESCE(r.name,'') FROM outlets o LEFT JOIN regions r ON r.id=o.region_id WHERE o.is_active=1 ORDER BY o.name`)
 	if err != nil {
@@ -26,6 +36,17 @@ func (h *CatalogHandler) Outlets(c fiber.Ctx) error {
 	}
 	return response.Success(c, items)
 }
+
+// Distributors handles GET /api/v1/settings/distributors.
+// @Summary List active distributors
+// @Description Returns active distributor catalog entries.
+// @Tags Catalog
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/settings/distributors [get]
 func (h *CatalogHandler) Distributors(c fiber.Ctx) error {
 	rows, err := h.db.QueryContext(c.Context(), `SELECT id,name FROM distributors WHERE is_active=1 ORDER BY name`)
 	if err != nil {
@@ -42,6 +63,17 @@ func (h *CatalogHandler) Distributors(c fiber.Ctx) error {
 	}
 	return response.Success(c, items)
 }
+
+// Types handles GET /api/v1/settings/types.
+// @Summary List active asset types
+// @Description Returns active asset type catalog entries.
+// @Tags Catalog
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/settings/types [get]
 func (h *CatalogHandler) Types(c fiber.Ctx) error {
 	rows, err := h.db.QueryContext(c.Context(), `SELECT id,name,code,CASE WHEN identifier_required=1 THEN 'Yes — '||identifier_type||' required' ELSE 'No' END FROM asset_types WHERE is_active=1 ORDER BY name`)
 	if err != nil {
@@ -58,6 +90,16 @@ func (h *CatalogHandler) Types(c fiber.Ctx) error {
 	}
 	return response.Success(c, items)
 }
+
+// Dashboard handles GET /api/v1/dashboard/overview.
+// @Summary Get dashboard overview
+// @Description Returns request statistics and dashboard activity data.
+// @Tags Catalog
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Router /api/v1/dashboard/overview [get]
 func (h *CatalogHandler) Dashboard(c fiber.Ctx) error {
 	var total, pending, progress, completed int
 	_ = h.db.QueryRowContext(c.Context(), `SELECT COUNT(*) FROM asset_requests`).Scan(&total)
