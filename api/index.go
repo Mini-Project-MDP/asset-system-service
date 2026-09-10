@@ -63,6 +63,7 @@ func initialize() error {
 		Database:            db,
 		DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
 		TokenManager:        tokenManager,
+		AllowedOrigins:      applicationConfig.AllowedOrigins,
 		Handlers: appHttp.Handlers{
 			Auth:    authHandlerInstance,
 			User:    userHandlerInstance,

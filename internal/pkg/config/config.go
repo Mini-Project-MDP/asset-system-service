@@ -29,6 +29,7 @@ type Config struct {
 	DatabasePingTimeout   time.Duration
 	JWTSecret             string
 	JWTExpiryDuration     time.Duration
+	AllowedOrigins        []string
 	ApprovalEngineBaseURL string
 	ApprovalEngineAPIKey  string
 }
@@ -101,6 +102,16 @@ func loadFromEnvironment(lookup environmentLookup) (Config, error) {
 		return Config{}, err
 	}
 
+	allowedOriginsStr := valueOrDefault(lookup, "ALLOWED_ORIGINS", "")
+	var allowedOrigins []string
+	if allowedOriginsStr != "" {
+		for _, o := range strings.Split(allowedOriginsStr, ",") {
+			if trimmed := strings.TrimSpace(o); trimmed != "" {
+				allowedOrigins = append(allowedOrigins, trimmed)
+			}
+		}
+	}
+
 	return Config{
 		AppEnvironment:        appEnvironment,
 		AppPort:               appPort,
@@ -109,6 +120,7 @@ func loadFromEnvironment(lookup environmentLookup) (Config, error) {
 		DatabasePingTimeout:   databasePingTimeout,
 		JWTSecret:             jwtSecret,
 		JWTExpiryDuration:     jwtExpiryDuration,
+		AllowedOrigins:        allowedOrigins,
 		ApprovalEngineBaseURL: approvalEngineBaseURL,
 		ApprovalEngineAPIKey:  approvalEngineAPIKey,
 	}, nil
