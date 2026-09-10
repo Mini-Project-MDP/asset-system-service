@@ -8,13 +8,13 @@ import (
 	"net/http"
 	"sync"
 
-	appHttp "github.com/Mini-Project-MDP/asset-system-service/pkg/delivery/http"
-	appHandler "github.com/Mini-Project-MDP/asset-system-service/pkg/delivery/http/handler"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/repository"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/service"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/config"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/database"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/jwt"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/config"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/database"
+	appHttp "github.com/Mini-Project-MDP/asset-system-service/internal/pkg/delivery/http"
+	appHandler "github.com/Mini-Project-MDP/asset-system-service/internal/pkg/delivery/http/handler"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/jwt"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/repository"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/service"
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
 )
 
@@ -59,8 +59,10 @@ func initialize() error {
 		DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
 		TokenManager:        tokenManager,
 		Handlers: appHttp.Handlers{
-			Auth: authHandlerInstance,
-			User: userHandlerInstance,
+			Auth:    authHandlerInstance,
+			User:    userHandlerInstance,
+			Request: appHandler.NewRequestHandler(databaseConnection),
+			Catalog: appHandler.NewCatalogHandler(databaseConnection),
 		},
 	})
 

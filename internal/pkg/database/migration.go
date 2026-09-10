@@ -133,6 +133,54 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
+
+	CREATE TABLE IF NOT EXISTS asset_requests (
+		id VARCHAR(36) PRIMARY KEY,
+		requester_id VARCHAR(36) NOT NULL,
+		outlet_id VARCHAR(36),
+		distributor_id VARCHAR(36),
+		asset_type_id VARCHAR(36),
+		sales_division VARCHAR(100) NOT NULL,
+		request_type VARCHAR(100),
+		quantity INTEGER NOT NULL,
+		priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+		status VARCHAR(30) NOT NULL DEFAULT 'WAITING_APPROVAL',
+		current_step INTEGER NOT NULL DEFAULT 0,
+		fulfillment_step INTEGER,
+		fulfillment_data TEXT,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (requester_id) REFERENCES users(id),
+		FOREIGN KEY (outlet_id) REFERENCES outlets(id),
+		FOREIGN KEY (distributor_id) REFERENCES distributors(id),
+		FOREIGN KEY (asset_type_id) REFERENCES asset_types(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS request_approval_steps (
+		id VARCHAR(36) PRIMARY KEY,
+		request_id VARCHAR(36) NOT NULL,
+		step_order INTEGER NOT NULL,
+		role_code VARCHAR(50) NOT NULL,
+		role_label VARCHAR(100) NOT NULL,
+		status VARCHAR(20) NOT NULL DEFAULT 'pending',
+		acted_by VARCHAR(36),
+		acted_at DATETIME,
+		comment TEXT,
+		UNIQUE(request_id, step_order),
+		FOREIGN KEY (request_id) REFERENCES asset_requests(id) ON DELETE CASCADE,
+		FOREIGN KEY (acted_by) REFERENCES users(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS request_history (
+		id VARCHAR(36) PRIMARY KEY,
+		request_id VARCHAR(36) NOT NULL,
+		actor_id VARCHAR(36),
+		action VARCHAR(50) NOT NULL,
+		comment TEXT,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (request_id) REFERENCES asset_requests(id) ON DELETE CASCADE,
+		FOREIGN KEY (actor_id) REFERENCES users(id)
+	);
 	`
 
 	if _, err := db.ExecContext(ctx, schemaSQL); err != nil {

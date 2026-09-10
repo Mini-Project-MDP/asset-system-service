@@ -3,7 +3,7 @@ package middleware
 import (
 	"errors"
 
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/response"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/response"
 	"github.com/gofiber/fiber/v3"
 )
 

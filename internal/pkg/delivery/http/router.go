@@ -5,10 +5,10 @@ import (
 	"time"
 
 	"github.com/Mini-Project-MDP/asset-system-service/docs"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/delivery/http/handler"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/delivery/http/middleware"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/jwt"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/response"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/delivery/http/handler"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/delivery/http/middleware"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/jwt"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/response"
 	"github.com/gofiber/contrib/v3/swaggerui"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
@@ -23,8 +23,10 @@ type DatabasePinger interface {
 
 // Handlers encapsulates all HTTP handlers for the application.
 type Handlers struct {
-	Auth *handler.AuthHandler
-	User *handler.UserHandler
+	Auth    *handler.AuthHandler
+	User    *handler.UserHandler
+	Request *handler.RequestHandler
+	Catalog *handler.CatalogHandler
 }
 
 // Dependencies contains infrastructure used by the HTTP application.
@@ -84,6 +86,28 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 	// Protected routes (require JWT)
 	if deps.TokenManager != nil {
 		protected := api.Group("", middleware.JWTAuth(deps.TokenManager))
+		if deps.Handlers.Request != nil {
+			requests := protected.Group("/requests", middleware.RequirePermission("request:read"))
+			requests.Get("/", deps.Handlers.Request.List)
+			requests.Get("/:id", deps.Handlers.Request.Detail)
+			requests.Post("/", middleware.RequirePermission("request:create"), deps.Handlers.Request.Create)
+			approvals := protected.Group("/approvals", middleware.RequirePermission("request:read"))
+			approvals.Get("/", deps.Handlers.Request.Approvals)
+			approvals.Get("/:id", deps.Handlers.Request.ApprovalDetail)
+			approvals.Post("/:id/action", middleware.RequirePermission("request:approve"), deps.Handlers.Request.ApprovalAction)
+			fulfillment := protected.Group("/fulfillment", middleware.RequirePermission("fulfillment:read"))
+			fulfillment.Get("/", deps.Handlers.Request.Fulfillment)
+			fulfillment.Get("/:id", deps.Handlers.Request.FulfillmentDetail)
+			fulfillment.Post("/:id/data", middleware.RequirePermission("fulfillment:process"), deps.Handlers.Request.SaveFulfillmentData)
+			fulfillment.Post("/:id/advance", middleware.RequirePermission("fulfillment:process"), deps.Handlers.Request.AdvanceFulfillment)
+		}
+		if deps.Handlers.Catalog != nil {
+			protected.Get("/dashboard/overview", deps.Handlers.Catalog.Dashboard)
+			settings := protected.Group("/settings", middleware.RequirePermission("settings:manage"))
+			settings.Get("/outlets", deps.Handlers.Catalog.Outlets)
+			settings.Get("/distributors", deps.Handlers.Catalog.Distributors)
+			settings.Get("/types", deps.Handlers.Catalog.Types)
+		}
 
 		if deps.Handlers.Auth != nil {
 			// Profile & User Settings

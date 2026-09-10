@@ -18,13 +18,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/delivery/http"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/delivery/http/handler"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/repository"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/service"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/config"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/database"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/jwt"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/config"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/database"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/delivery/http"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/delivery/http/handler"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/jwt"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/repository"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/service"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -75,8 +75,10 @@ func run() error {
 		DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
 		TokenManager:        tokenManager,
 		Handlers: http.Handlers{
-			Auth: authHandler,
-			User: userHandler,
+			Auth:    authHandler,
+			User:    userHandler,
+			Request: handler.NewRequestHandler(databaseConnection),
+			Catalog: handler.NewCatalogHandler(databaseConnection),
 		},
 	})
 

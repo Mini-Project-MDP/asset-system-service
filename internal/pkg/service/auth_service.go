@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/domain"
-	"github.com/Mini-Project-MDP/asset-system-service/pkg/jwt"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/domain"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/jwt"
 )
 
 type authService struct {
