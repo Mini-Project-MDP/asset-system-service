@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/client/approvalengine"
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/config"
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/database"
 	appHttp "github.com/Mini-Project-MDP/asset-system-service/internal/pkg/delivery/http"
@@ -54,6 +55,10 @@ func initialize() error {
 	authHandlerInstance := appHandler.NewAuthHandler(authService)
 	userHandlerInstance := appHandler.NewUserHandler(authService)
 
+	approvalEngineClient := approvalengine.New(applicationConfig.ApprovalEngineBaseURL, applicationConfig.ApprovalEngineAPIKey, nil)
+	requestRepo := repository.NewRequestRepository(databaseConnection)
+	requestService := service.NewRequestService(requestRepo, approvalEngineClient)
+
 	fiberApp := appHttp.NewRouter(appHttp.Dependencies{
 		Database:            db,
 		DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
@@ -61,7 +66,7 @@ func initialize() error {
 		Handlers: appHttp.Handlers{
 			Auth:    authHandlerInstance,
 			User:    userHandlerInstance,
-			Request: appHandler.NewRequestHandler(databaseConnection),
+			Request: appHandler.NewRequestHandler(requestService),
 			Catalog: appHandler.NewCatalogHandler(databaseConnection),
 		},
 	})

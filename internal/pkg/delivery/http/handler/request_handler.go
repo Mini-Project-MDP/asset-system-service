@@ -1,20 +1,26 @@
 package handler
 
 import (
-	"database/sql"
+	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/delivery/http/middleware"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/domain"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/jwt"
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/response"
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/service"
 	"github.com/gofiber/fiber/v3"
-	"github.com/google/uuid"
 )
 
-type RequestHandler struct{ db *sql.DB }
+type RequestHandler struct {
+	service domain.RequestService
+}
 
-func NewRequestHandler(db *sql.DB) *RequestHandler { return &RequestHandler{db: db} }
+func NewRequestHandler(requestService domain.RequestService) *RequestHandler {
+	return &RequestHandler{service: requestService}
+}
 
-type createRequest struct {
+type createRequestBody struct {
 	Category      string `json:"category"`
 	Outlet        string `json:"outlet"`
 	Distributor   string `json:"distributor"`
@@ -24,6 +30,9 @@ type createRequest struct {
 	RequesterName string `json:"requesterName"`
 	Qty           int    `json:"qty"`
 	Priority      string `json:"priority"`
+	// RevisedFromID: set when this request resubmits one that was sent back
+	// for revision (see docs/approval-engine-integration-plan.md Fase 0).
+	RevisedFromID *string `json:"revisedFromId,omitempty"`
 }
 
 // List handles GET /api/v1/requests.
@@ -39,31 +48,14 @@ type createRequest struct {
 // @Failure 500 {object} response.Response
 // @Router /api/v1/requests [get]
 func (h *RequestHandler) List(c fiber.Ctx) error {
-	q, typ := strings.ToLower(c.Query("q")), c.Query("type")
-	rows, err := h.db.QueryContext(c.Context(), `SELECT ar.id, at.name, o.name, ar.quantity, ar.priority, d.name, ar.sales_division, ar.request_type, u.name, ar.created_at, ar.current_step, ar.fulfillment_step, ar.status FROM asset_requests ar JOIN users u ON u.id=ar.requester_id LEFT JOIN outlets o ON o.id=ar.outlet_id LEFT JOIN distributors d ON d.id=ar.distributor_id LEFT JOIN asset_types at ON at.id=ar.asset_type_id ORDER BY ar.created_at DESC`)
+	items, err := h.service.List(c.Context(), domain.RequestFilter{
+		Query: c.Query("q"),
+		Type:  c.Query("type"),
+	})
 	if err != nil {
-		return response.Error(c, 500, err.Error())
+		return response.Error(c, fiber.StatusInternalServerError, err.Error())
 	}
-	defer rows.Close()
-	items := make([]fiber.Map, 0)
-	for rows.Next() {
-		var id, priority, division, by, created, dbStatus string
-		var categoryNS, outletNS, distributorNS, reqTypeNS sql.NullString
-		var qty, step int
-		var fulfill sql.NullInt64
-		if err := rows.Scan(&id, &categoryNS, &outletNS, &qty, &priority, &distributorNS, &division, &reqTypeNS, &by, &created, &step, &fulfill, &dbStatus); err != nil {
-			return response.Error(c, 500, err.Error())
-		}
-		category, outlet, distributor, reqType := categoryNS.String, outletNS.String, distributorNS.String, reqTypeNS.String
-		if q != "" && !strings.Contains(strings.ToLower(id+outlet+by), q) {
-			continue
-		}
-		if typ != "" && typ != "All types" && category != typ {
-			continue
-		}
-		items = append(items, requestMap(id, category, outlet, qty, priority, distributor, division, reqType, by, created, step, fulfill, dbStatus))
-	}
-	return response.Success(c, items)
+	return response.Success(c, mapRequestList(items))
 }
 
 // Detail handles GET /api/v1/requests/{id}.
@@ -78,32 +70,11 @@ func (h *RequestHandler) List(c fiber.Ctx) error {
 // @Failure 404 {object} response.Response
 // @Router /api/v1/requests/{id} [get]
 func (h *RequestHandler) Detail(c fiber.Ctx) error {
-	c.Request().URI().SetPath("/api/requests")
-	// Detail reuses the list query and selects the requested item.
-	var id string
-	if err := h.db.QueryRowContext(c.Context(), `SELECT id FROM asset_requests WHERE id=?`, c.Params("id")).Scan(&id); err != nil {
-		return response.Error(c, fiber.StatusNotFound, "Request not found")
+	item, err := h.service.Detail(c.Context(), c.Params("id"))
+	if err != nil {
+		return requestErrorResponse(c, err)
 	}
-	// Keep the response contract centralized in List by filtering its result.
-	var result fiber.Map
-	_ = result
-	return h.listOne(c, id)
-}
-
-func (h *RequestHandler) listOne(c fiber.Ctx, id string) error {
-	items := &fiber.App{}
-	_ = items
-	// Query through the same projection used by List.
-	row := h.db.QueryRowContext(c.Context(), `SELECT ar.id, at.name, o.name, ar.quantity, ar.priority, d.name, ar.sales_division, ar.request_type, u.name, ar.created_at, ar.current_step, ar.fulfillment_step, ar.status FROM asset_requests ar JOIN users u ON u.id=ar.requester_id LEFT JOIN outlets o ON o.id=ar.outlet_id LEFT JOIN distributors d ON d.id=ar.distributor_id LEFT JOIN asset_types at ON at.id=ar.asset_type_id WHERE ar.id=?`, id)
-	var rid, priority, division, by, created, dbStatus string
-	var categoryNS, outletNS, distributorNS, reqTypeNS sql.NullString
-	var qty, step int
-	var fulfill sql.NullInt64
-	if err := row.Scan(&rid, &categoryNS, &outletNS, &qty, &priority, &distributorNS, &division, &reqTypeNS, &by, &created, &step, &fulfill, &dbStatus); err != nil {
-		return response.Error(c, 404, "Request not found")
-	}
-	category, outlet, distributor, reqType := categoryNS.String, outletNS.String, distributorNS.String, reqTypeNS.String
-	return response.Success(c, requestMap(rid, category, outlet, qty, priority, distributor, division, reqType, by, created, step, fulfill, dbStatus))
+	return response.Success(c, mapRequest(*item))
 }
 
 // Create handles POST /api/v1/requests.
@@ -113,28 +84,34 @@ func (h *RequestHandler) listOne(c fiber.Ctx, id string) error {
 // @Accept json
 // @Produce json
 // @Security BearerAuth
-// @Param request body createRequest true "Asset request payload"
+// @Param request body createRequestBody true "Asset request payload"
 // @Success 200 {object} response.Response
 // @Failure 400 {object} response.Response
 // @Failure 401 {object} response.Response
 // @Failure 500 {object} response.Response
 // @Router /api/v1/requests [post]
 func (h *RequestHandler) Create(c fiber.Ctx) error {
-	var req createRequest
-	if err := c.Bind().Body(&req); err != nil || req.Qty < 1 || req.Category == "" {
-		return response.Error(c, 400, "Invalid request payload")
+	var body createRequestBody
+	if err := c.Bind().Body(&body); err != nil {
+		return response.Error(c, fiber.StatusBadRequest, "Invalid request payload")
 	}
-	var userID string
-	// Requester is resolved by email/name when available; seed users provide a safe fallback.
-	if err := h.db.QueryRowContext(c.Context(), `SELECT id FROM users WHERE name=? OR email=? LIMIT 1`, req.RequesterName, req.RequesterName).Scan(&userID); err != nil {
-		return response.Error(c, 400, "Requester not found")
-	}
-	id := "REQ-" + strings.ToUpper(uuid.NewString()[:8])
-	_, err := h.db.ExecContext(c.Context(), `INSERT INTO asset_requests (id,requester_id,sales_division,request_type,quantity,priority,status,current_step,fulfillment_step) VALUES (?,?,?,?,?,?, 'WAITING_APPROVAL',0,NULL)`, id, userID, req.SalesDivision, req.ReqType, req.Qty, req.Priority)
+
+	item, err := h.service.Create(c.Context(), domain.CreateRequestInput{
+		Category:      body.Category,
+		Outlet:        body.Outlet,
+		Distributor:   body.Distributor,
+		SalesDivision: body.SalesDivision,
+		ReqType:       body.ReqType,
+		RequesterRole: body.RequesterRole,
+		RequesterName: body.RequesterName,
+		Qty:           body.Qty,
+		Priority:      body.Priority,
+		RevisedFromID: body.RevisedFromID,
+	})
 	if err != nil {
-		return response.Error(c, 500, err.Error())
+		return requestErrorResponse(c, err)
 	}
-	return h.listOne(c, id)
+	return response.Success(c, mapRequest(*item))
 }
 
 // Approvals handles GET /api/v1/approvals.
@@ -173,30 +150,27 @@ func (h *RequestHandler) ApprovalDetail(c fiber.Ctx) error { return h.Detail(c) 
 // @Router /api/v1/approvals/{id}/action [post]
 func (h *RequestHandler) ApprovalAction(c fiber.Ctx) error {
 	var body struct {
-		Action string `json:"action"`
+		Action  string  `json:"action"`
+		Comment *string `json:"comment,omitempty"`
 	}
 	if err := c.Bind().Body(&body); err != nil || body.Action == "" {
-		return response.Error(c, 400, "Invalid approval action")
+		return response.Error(c, fiber.StatusBadRequest, "Invalid approval action")
 	}
-	status := "WAITING_APPROVAL"
-	step := 0
-	switch body.Action {
-	case "approve":
-		status = "APPROVED"
-		step = 1
-	case "revision":
-		status = "REVISION"
-		step = -1
-	case "reject":
-		status = "REJECTED"
-		step = -2
-	default:
-		return response.Error(c, 400, "Unsupported approval action")
+
+	claims, ok := c.Locals(middleware.UserContextKey).(*jwt.UserClaims)
+	if !ok || claims == nil {
+		return response.Error(c, fiber.StatusUnauthorized, "Unauthorized context")
 	}
-	if _, err := h.db.ExecContext(c.Context(), `UPDATE asset_requests SET status=?, current_step=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, status, step, c.Params("id")); err != nil {
-		return response.Error(c, 500, err.Error())
+
+	item, err := h.service.ApprovalAction(c.Context(), c.Params("id"), domain.ApprovalActionInput{
+		Action:          body.Action,
+		ActorEmployeeNo: claims.EmployeeNo,
+		Comment:         body.Comment,
+	})
+	if err != nil {
+		return requestErrorResponse(c, err)
 	}
-	return h.listOne(c, c.Params("id"))
+	return response.Success(c, mapRequest(*item))
 }
 
 // Fulfillment handles GET /api/v1/fulfillment.
@@ -221,35 +195,77 @@ func (h *RequestHandler) Fulfillment(c fiber.Ctx) error { return h.List(c) }
 // @Router /api/v1/fulfillment/{id} [get]
 func (h *RequestHandler) FulfillmentDetail(c fiber.Ctx) error { return h.Detail(c) }
 
+// SaveFulfillmentData handles POST /api/v1/fulfillment/{id}/data.
+// @Summary Save fulfillment data
+// @Tags Requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Request ID"
+// @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Router /api/v1/fulfillment/{id}/data [post]
 func (h *RequestHandler) SaveFulfillmentData(c fiber.Ctx) error {
 	var body struct {
 		FulfillData interface{} `json:"fulfillData"`
 	}
 	if err := c.Bind().Body(&body); err != nil {
-		return response.Error(c, 400, "Invalid fulfillment payload")
+		return response.Error(c, fiber.StatusBadRequest, "Invalid fulfillment payload")
 	}
-	if _, err := h.db.ExecContext(c.Context(), `UPDATE asset_requests SET fulfillment_data=?, fulfillment_step=1, status='FULFILLMENT', updated_at=CURRENT_TIMESTAMP WHERE id=?`, fmt.Sprint(body.FulfillData), c.Params("id")); err != nil {
-		return response.Error(c, 500, err.Error())
+
+	item, err := h.service.SaveFulfillmentData(c.Context(), c.Params("id"), fmt.Sprint(body.FulfillData))
+	if err != nil {
+		return requestErrorResponse(c, err)
 	}
-	return h.listOne(c, c.Params("id"))
+	return response.Success(c, mapRequest(*item))
 }
 
+// AdvanceFulfillment handles POST /api/v1/fulfillment/{id}/advance.
+// @Summary Advance fulfillment to the next stage
+// @Tags Requests
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Request ID"
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Router /api/v1/fulfillment/{id}/advance [post]
 func (h *RequestHandler) AdvanceFulfillment(c fiber.Ctx) error {
-	if _, err := h.db.ExecContext(c.Context(), `UPDATE asset_requests SET fulfillment_step=COALESCE(fulfillment_step,0)+1, status=CASE WHEN COALESCE(fulfillment_step,0)+1 >= 4 THEN 'COMPLETED' ELSE 'FULFILLMENT' END, updated_at=CURRENT_TIMESTAMP WHERE id=?`, c.Params("id")); err != nil {
-		return response.Error(c, 500, err.Error())
+	item, err := h.service.AdvanceFulfillment(c.Context(), c.Params("id"))
+	if err != nil {
+		return requestErrorResponse(c, err)
 	}
-	return h.listOne(c, c.Params("id"))
+	return response.Success(c, mapRequest(*item))
 }
 
-func requestMap(id, category, outlet string, qty int, priority, distributor, division, reqType, by, created string, step int, fulfill sql.NullInt64, dbStatus string) fiber.Map {
-	statusText := "Waiting — Approval"
-	if dbStatus == "COMPLETED" {
-		statusText = "Completed"
-	}
-	return fiber.Map{"id": id, "type": category, "outlet": outlet, "qty": qty, "pri": priority, "distributor": distributor, "salesDivision": division, "reqType": reqType, "by": by, "byRole": "Requester", "date": created, "step": step, "chain": []fiber.Map{}, "hist": []fiber.Map{}, "statusTag": fiber.Map{"cls": "warn", "text": statusText}, "fulfillStep": func() interface{} {
-		if fulfill.Valid {
-			return fulfill.Int64
+// requestErrorResponse maps request_service sentinel errors to their HTTP
+// status code, instead of collapsing every failure to 500.
+func requestErrorResponse(c fiber.Ctx, err error) error {
+	var engineErr *domain.EngineAPIError
+	switch {
+	case errors.Is(err, service.ErrRequestNotFound):
+		return response.Error(c, fiber.StatusNotFound, "Request not found")
+	case errors.Is(err, service.ErrRequesterNotFound):
+		return response.Error(c, fiber.StatusBadRequest, "Requester not found")
+	case errors.Is(err, service.ErrInvalidRequestPayload):
+		return response.Error(c, fiber.StatusBadRequest, "Invalid request payload")
+	case errors.Is(err, service.ErrUnsupportedApprovalAction):
+		return response.Error(c, fiber.StatusBadRequest, "Unsupported approval action")
+	case errors.Is(err, service.ErrRevisionCommentRequired):
+		return response.Error(c, fiber.StatusBadRequest, "Comment is required when requesting revision")
+	case errors.Is(err, service.ErrApprovalNotSynced):
+		return response.Error(c, fiber.StatusConflict, "Request has not synced with the approval engine yet, try again shortly")
+	case errors.As(err, &engineErr):
+		// The engine's own business rejections (e.g. "not the assigned
+		// approver", "already decided") are already framed as 4xx — pass
+		// them through as-is instead of collapsing to 500. An unexpected
+		// non-4xx status from the engine is surfaced as a gateway failure.
+		status := engineErr.StatusCode
+		if status < 400 || status >= 500 {
+			status = fiber.StatusBadGateway
 		}
-		return nil
-	}(), "fulfillData": nil}
+		return response.Error(c, status, engineErr.Message)
+	default:
+		return response.Error(c, fiber.StatusInternalServerError, err.Error())
+	}
 }

@@ -22,13 +22,15 @@ const (
 
 // Config contains all runtime configuration required by the API.
 type Config struct {
-	AppEnvironment      string
-	AppPort             int
-	DatabaseURL         string
-	DatabaseAuthToken   string
-	DatabasePingTimeout time.Duration
-	JWTSecret           string
-	JWTExpiryDuration   time.Duration
+	AppEnvironment        string
+	AppPort               int
+	DatabaseURL           string
+	DatabaseAuthToken     string
+	DatabasePingTimeout   time.Duration
+	JWTSecret             string
+	JWTExpiryDuration     time.Duration
+	ApprovalEngineBaseURL string
+	ApprovalEngineAPIKey  string
 }
 
 // Address returns the HTTP server address derived from APP_PORT.
@@ -86,14 +88,29 @@ func loadFromEnvironment(lookup environmentLookup) (Config, error) {
 		jwtExpiryDuration = defaultJWTExpiry
 	}
 
+	// Required so the service fails fast at startup if misconfigured, rather
+	// than only surfacing "engine unreachable" the first time a request or
+	// approval action actually needs it. See
+	// docs/approval-engine-integration-plan.md.
+	approvalEngineBaseURL, err := requiredValue(lookup, "APPROVAL_ENGINE_BASE_URL")
+	if err != nil {
+		return Config{}, err
+	}
+	approvalEngineAPIKey, err := requiredValue(lookup, "APPROVAL_ENGINE_API_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
-		AppEnvironment:      appEnvironment,
-		AppPort:             appPort,
-		DatabaseURL:         databaseURL,
-		DatabaseAuthToken:   databaseAuthToken,
-		DatabasePingTimeout: databasePingTimeout,
-		JWTSecret:           jwtSecret,
-		JWTExpiryDuration:   jwtExpiryDuration,
+		AppEnvironment:        appEnvironment,
+		AppPort:               appPort,
+		DatabaseURL:           databaseURL,
+		DatabaseAuthToken:     databaseAuthToken,
+		DatabasePingTimeout:   databasePingTimeout,
+		JWTSecret:             jwtSecret,
+		JWTExpiryDuration:     jwtExpiryDuration,
+		ApprovalEngineBaseURL: approvalEngineBaseURL,
+		ApprovalEngineAPIKey:  approvalEngineAPIKey,
 	}, nil
 }
 

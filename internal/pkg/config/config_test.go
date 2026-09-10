@@ -8,8 +8,10 @@ import (
 
 func TestLoadFromEnvironment(t *testing.T) {
 	values := map[string]string{
-		"TURSO_DATABASE_URL": "libsql://example.turso.io",
-		"TURSO_AUTH_TOKEN":   "test-token",
+		"TURSO_DATABASE_URL":       "libsql://example.turso.io",
+		"TURSO_AUTH_TOKEN":         "test-token",
+		"APPROVAL_ENGINE_BASE_URL": "http://localhost:8000",
+		"APPROVAL_ENGINE_API_KEY":  "test-engine-key",
 	}
 
 	config, err := loadFromEnvironment(mapLookup(values))
@@ -33,9 +35,11 @@ func TestLoadFromEnvironment(t *testing.T) {
 
 func TestLoadFromEnvironmentWithPort(t *testing.T) {
 	values := map[string]string{
-		"TURSO_DATABASE_URL": "libsql://example.turso.io",
-		"TURSO_AUTH_TOKEN":   "test-token",
-		"PORT":               "40399",
+		"TURSO_DATABASE_URL":       "libsql://example.turso.io",
+		"TURSO_AUTH_TOKEN":         "test-token",
+		"APPROVAL_ENGINE_BASE_URL": "http://localhost:8000",
+		"APPROVAL_ENGINE_API_KEY":  "test-engine-key",
+		"PORT":                     "40399",
 	}
 
 	config, err := loadFromEnvironment(mapLookup(values))
@@ -66,6 +70,23 @@ func TestLoadFromEnvironmentRequiresDatabaseConfiguration(t *testing.T) {
 			name:     "missing token",
 			values:   map[string]string{"TURSO_DATABASE_URL": "libsql://example.turso.io"},
 			expected: "TURSO_AUTH_TOKEN is required",
+		},
+		{
+			name: "missing approval engine base url",
+			values: map[string]string{
+				"TURSO_DATABASE_URL": "libsql://example.turso.io",
+				"TURSO_AUTH_TOKEN":   "test-token",
+			},
+			expected: "APPROVAL_ENGINE_BASE_URL is required",
+		},
+		{
+			name: "missing approval engine api key",
+			values: map[string]string{
+				"TURSO_DATABASE_URL":       "libsql://example.turso.io",
+				"TURSO_AUTH_TOKEN":         "test-token",
+				"APPROVAL_ENGINE_BASE_URL": "http://localhost:8000",
+			},
+			expected: "APPROVAL_ENGINE_API_KEY is required",
 		},
 	}
 
@@ -115,9 +136,11 @@ func TestLoadFromEnvironmentValidatesValues(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			values := map[string]string{
-				"TURSO_DATABASE_URL":    "libsql://example.turso.io",
-				"TURSO_AUTH_TOKEN":      "test-token",
-				"DATABASE_PING_TIMEOUT": "5s",
+				"TURSO_DATABASE_URL":       "libsql://example.turso.io",
+				"TURSO_AUTH_TOKEN":         "test-token",
+				"DATABASE_PING_TIMEOUT":    "5s",
+				"APPROVAL_ENGINE_BASE_URL": "http://localhost:8000",
+				"APPROVAL_ENGINE_API_KEY":  "test-engine-key",
 			}
 			values[test.key] = test.value
 

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -18,6 +19,59 @@ type SeedUserDef struct {
 	Password   string
 	IsMaster   int
 	RoleID     string
+}
+
+// approvalEngineColumns are the asset_requests columns added for the Approval
+// Engine integration. Kept as a slice (not part of the CREATE TABLE string)
+// because they must also be backfilled onto databases where asset_requests
+// already existed before this integration — see ensureApprovalEngineColumns.
+var approvalEngineColumns = []string{
+	"approval_request_id VARCHAR(36)",
+	"approval_status VARCHAR(30)",
+	"current_step_name VARCHAR(100)",
+	"revised_from_id VARCHAR(36)",
+}
+
+// ensureApprovalEngineColumns adds any approvalEngineColumns missing from an
+// existing asset_requests table. SQLite/libSQL has no "ADD COLUMN IF NOT
+// EXISTS", so existing columns are discovered via PRAGMA table_info first.
+func ensureApprovalEngineColumns(ctx context.Context, db *sql.DB) error {
+	existing := make(map[string]bool)
+
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(asset_requests)`)
+	if err != nil {
+		return fmt.Errorf("inspect asset_requests columns: %w", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan asset_requests column info: %w", err)
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate asset_requests column info: %w", err)
+	}
+	rows.Close()
+
+	for _, columnDef := range approvalEngineColumns {
+		columnName := columnDef[:strings.IndexByte(columnDef, ' ')]
+		if existing[columnName] {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, fmt.Sprintf(
+			`ALTER TABLE asset_requests ADD COLUMN %s`, columnDef,
+		)); err != nil {
+			return fmt.Errorf("add asset_requests.%s: %w", columnName, err)
+		}
+		log.Printf("asset_requests: added missing column %s", columnName)
+	}
+
+	return nil
 }
 
 // MigrateAndSeed initializes database schema and seeds default data.
@@ -148,12 +202,19 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 		current_step INTEGER NOT NULL DEFAULT 0,
 		fulfillment_step INTEGER,
 		fulfillment_data TEXT,
+		-- Approval Engine integration (see docs/approval-engine-integration-plan.md):
+		-- pointer + cached mirror of the request's state in Approval-Engine-Service.
+		approval_request_id VARCHAR(36),
+		approval_status VARCHAR(30),
+		current_step_name VARCHAR(100),
+		revised_from_id VARCHAR(36),
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (requester_id) REFERENCES users(id),
 		FOREIGN KEY (outlet_id) REFERENCES outlets(id),
 		FOREIGN KEY (distributor_id) REFERENCES distributors(id),
-		FOREIGN KEY (asset_type_id) REFERENCES asset_types(id)
+		FOREIGN KEY (asset_type_id) REFERENCES asset_types(id),
+		FOREIGN KEY (revised_from_id) REFERENCES asset_requests(id)
 	);
 
 	CREATE TABLE IF NOT EXISTS request_approval_steps (
@@ -187,6 +248,13 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("execute schema migration: %w", err)
 	}
 
+	// asset_requests already exists on databases provisioned before the Approval
+	// Engine integration columns were added above; CREATE TABLE IF NOT EXISTS is a
+	// no-op there, so backfill the new columns explicitly.
+	if err := ensureApprovalEngineColumns(ctx, db); err != nil {
+		return fmt.Errorf("backfill approval engine columns: %w", err)
+	}
+
 	log.Println("Seeding permissions, roles, and user data...")
 	seedSQL := `
 	INSERT OR IGNORE INTO permissions (id, code, name, description) VALUES
@@ -205,12 +273,35 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 	('perm_ful_read', 'fulfillment:read', 'Read Fulfillment', 'View fulfillment statuses'),
 	('perm_set_manage', 'settings:manage', 'Manage Settings', 'Update system and application settings');
 
+	-- asset_types was previously unseeded, so Create()'s category never
+	-- resolved to an asset_type_id and was lost on read-back — a real bug,
+	-- surfaced by exercising cmd/retrypendingsync (Milestone 7). Codes match
+	-- the category strings asset-system-frontend already sends.
+	INSERT OR IGNORE INTO asset_types (id, code, name, identifier_type, identifier_required) VALUES
+	('atype_barcode', 'Barcode', 'Barcode Scanner', 'SERIAL_NUMBER', 1),
+	('atype_android', 'Android', 'Android Device', 'SERIAL_NUMBER', 1),
+	('atype_server', 'Server', 'Server', 'SERIAL_NUMBER', 1);
+
 	INSERT OR IGNORE INTO roles (id, code, name, role_type, approval_rank) VALUES
 	('role_master', 'MASTER_ADMIN', 'Master Admin', 'SYSTEM', 100),
 	('role_mgr', 'ASSET_MANAGER', 'Asset Manager', 'OPERATIONAL', 80),
 	('role_appr', 'DEPARTMENT_APPROVER', 'Department Approver', 'APPROVAL', 50),
 	('role_staff', 'FIELD_STAFF', 'Field Staff', 'OPERATIONAL', 30),
 	('role_user', 'REGULAR_USER', 'Regular User', 'GENERAL', 10);
+
+	-- DEMO/TEST DATA for Approval Engine integration (Milestone 3): mirrors the
+	-- approval-chain role codes the frontend mocks in CATEGORY_HIERARCHY
+	-- (see asset-system-frontend/src/features/requests/services/requestService.ts).
+	-- Remove before pointing this service at a real production database, once
+	-- real org roles/hierarchy are sourced from HR data instead.
+	INSERT OR IGNORE INTO roles (id, code, name, role_type, approval_rank) VALUES
+	('role_sa', 'SA', 'Sales Admin', 'APPROVAL', 10),
+	('role_ss', 'SS', 'Sales Supervisor', 'APPROVAL', 20),
+	('role_rsm', 'RSM', 'Regional Sales Manager', 'APPROVAL', 30),
+	('role_grsm', 'GRSM', 'Group Regional Sales Manager', 'APPROVAL', 40),
+	('role_nsm', 'NSM', 'National Sales Manager', 'APPROVAL', 50),
+	('role_sd', 'SD', 'Sales Director', 'APPROVAL', 60),
+	('role_cabang', 'Cabang', 'Cabang / Distributor', 'APPROVAL', 25);
 
 	INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES
 	('role_master', 'perm_u_read'), ('role_master', 'perm_u_write'), ('role_master', 'perm_u_delete'), ('role_master', 'perm_u_master'),
@@ -228,6 +319,20 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 	('role_staff', 'perm_ful_process'), ('role_staff', 'perm_ful_read'),
 	('role_user', 'perm_u_read'), ('role_user', 'perm_a_read'),
 	('role_user', 'perm_req_create'), ('role_user', 'perm_req_read');
+
+	-- DEMO/TEST: RBAC for the approval-chain roles (see roles seed above).
+	-- request:approve so each can act on /approvals/{id}/action; the engine's
+	-- own "are you the assigned participant" check is the real authorization
+	-- for approval — this RBAC grant only gets them past this service's
+	-- permission gate to reach that check at all.
+	INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES
+	('role_sa', 'perm_req_create'), ('role_sa', 'perm_req_read'),
+	('role_ss', 'perm_req_create'), ('role_ss', 'perm_req_read'), ('role_ss', 'perm_req_approve'),
+	('role_rsm', 'perm_req_create'), ('role_rsm', 'perm_req_read'), ('role_rsm', 'perm_req_approve'),
+	('role_grsm', 'perm_req_create'), ('role_grsm', 'perm_req_read'), ('role_grsm', 'perm_req_approve'),
+	('role_nsm', 'perm_req_create'), ('role_nsm', 'perm_req_read'), ('role_nsm', 'perm_req_approve'),
+	('role_sd', 'perm_req_create'), ('role_sd', 'perm_req_read'), ('role_sd', 'perm_req_approve'),
+	('role_cabang', 'perm_req_create'), ('role_cabang', 'perm_req_read');
 	`
 
 	if _, err := db.ExecContext(ctx, seedSQL); err != nil {
@@ -257,6 +362,16 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 		// Regular Users
 		{ID: "usr_user1", EmployeeNo: "EMP009", Name: "Regular User One", Email: "user1@mayora.com", Password: string(hashedPassword), IsMaster: 0, RoleID: "role_user"},
 		{ID: "usr_user2", EmployeeNo: "EMP010", Name: "Regular User Two", Email: "user2@mayora.com", Password: string(hashedPassword), IsMaster: 0, RoleID: "role_user"},
+		// DEMO/TEST: approval-chain users (Barcode hierarchy: SA→SS→RSM→GRSM→NSM→SD).
+		// See the roles seed above for why these exist. Remove alongside it.
+		{ID: "usr_sa1", EmployeeNo: "EMP101", Name: "Demo Sales Admin", Email: "demo.sa1@mayora.com", Password: string(hashedPassword), IsMaster: 0, RoleID: "role_sa"},
+		{ID: "usr_ss1", EmployeeNo: "EMP102", Name: "Demo Sales Supervisor", Email: "demo.ss1@mayora.com", Password: string(hashedPassword), IsMaster: 0, RoleID: "role_ss"},
+		{ID: "usr_rsm1", EmployeeNo: "EMP103", Name: "Demo Regional Sales Manager", Email: "demo.rsm1@mayora.com", Password: string(hashedPassword), IsMaster: 0, RoleID: "role_rsm"},
+		{ID: "usr_grsm1", EmployeeNo: "EMP104", Name: "Demo Group RSM", Email: "demo.grsm1@mayora.com", Password: string(hashedPassword), IsMaster: 0, RoleID: "role_grsm"},
+		{ID: "usr_nsm1", EmployeeNo: "EMP105", Name: "Demo National Sales Manager", Email: "demo.nsm1@mayora.com", Password: string(hashedPassword), IsMaster: 0, RoleID: "role_nsm"},
+		{ID: "usr_sd1", EmployeeNo: "EMP106", Name: "Demo Sales Director", Email: "demo.sd1@mayora.com", Password: string(hashedPassword), IsMaster: 0, RoleID: "role_sd"},
+		// DEMO/TEST: Cabang requester for the Android/Server hierarchy (Cabang→GRSM→NSM→SD).
+		{ID: "usr_cabang1", EmployeeNo: "EMP107", Name: "Demo Cabang", Email: "demo.cabang1@mayora.com", Password: string(hashedPassword), IsMaster: 0, RoleID: "role_cabang"},
 	}
 
 	for _, u := range usersToSeed {
@@ -285,6 +400,65 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 		`, userRoleID, u.ID, u.RoleID)
 	}
 
+	if err := seedDemoApprovalHierarchy(ctx, db); err != nil {
+		return fmt.Errorf("seed demo approval hierarchy: %w", err)
+	}
+
 	log.Println("Database migration and seeding completed successfully.")
+	return nil
+}
+
+// demoEmployee is one row of the DEMO/TEST m_employee data seeded for
+// Approval Engine participant sync (Milestone 3). m_employee.nik doubles as
+// users.employee_no here so the two tables can be joined by that value; a
+// real HR sync would use whatever key the HR source system actually uses.
+type demoEmployee struct {
+	NIK        string // == users.employee_no
+	UserID     string // == users.id
+	FullName   string
+	SuperiorID string // NIK of the superior; "" for the top of the chain
+}
+
+// seedDemoApprovalHierarchy populates m_employee for the DEMO/TEST users
+// added above, forming one full approval chain
+// (SA→SS→RSM→GRSM→NSM→SD, plus Cabang→GRSM for the Android/Server hierarchy)
+// so participant sync + workflow resolution can be verified end-to-end
+// before real HR data is available. m_employee has no primary key or unique
+// constraint, so rows are inserted only if a matching nik doesn't already
+// exist — otherwise every service restart would duplicate them.
+//
+// Remove this function (and its DEMO/TEST callers above) once m_employee is
+// populated by a real HR sync.
+func seedDemoApprovalHierarchy(ctx context.Context, db *sql.DB) error {
+	employees := []demoEmployee{
+		{NIK: "EMP106", UserID: "usr_sd1", FullName: "Demo Sales Director", SuperiorID: ""},
+		{NIK: "EMP105", UserID: "usr_nsm1", FullName: "Demo National Sales Manager", SuperiorID: "EMP106"},
+		{NIK: "EMP104", UserID: "usr_grsm1", FullName: "Demo Group RSM", SuperiorID: "EMP105"},
+		{NIK: "EMP103", UserID: "usr_rsm1", FullName: "Demo Regional Sales Manager", SuperiorID: "EMP104"},
+		{NIK: "EMP102", UserID: "usr_ss1", FullName: "Demo Sales Supervisor", SuperiorID: "EMP103"},
+		{NIK: "EMP101", UserID: "usr_sa1", FullName: "Demo Sales Admin", SuperiorID: "EMP102"},
+		{NIK: "EMP107", UserID: "usr_cabang1", FullName: "Demo Cabang", SuperiorID: "EMP104"},
+	}
+
+	for _, e := range employees {
+		var exists int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM m_employee WHERE nik = ?`, e.NIK).Scan(&exists); err != nil {
+			return fmt.Errorf("check m_employee %s: %w", e.NIK, err)
+		}
+		if exists > 0 {
+			continue
+		}
+
+		var superiorID sql.NullString
+		if e.SuperiorID != "" {
+			superiorID = sql.NullString{String: e.SuperiorID, Valid: true}
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO m_employee (nik, emp_id, emp_nm, user_id, full_name, is_vacant, superior_id, is_terminate)
+			VALUES (?, ?, ?, ?, ?, 'N', ?, 'N')
+		`, e.NIK, e.NIK, e.FullName, e.UserID, e.FullName, superiorID); err != nil {
+			return fmt.Errorf("insert m_employee %s: %w", e.NIK, err)
+		}
+	}
 	return nil
 }

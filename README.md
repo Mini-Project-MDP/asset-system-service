@@ -39,9 +39,42 @@ DATABASE_PING_TIMEOUT=5s
 
 TURSO_DATABASE_URL=libsql://your-database.turso.io
 TURSO_AUTH_TOKEN=your-auth-token
+
+# Approval Engine integration — lihat docs/approval-engine-integration-plan.md.
+# api_key didapat dari POST /api/v1/applications di Approval-Engine-Service
+# (ditampilkan sekali saat dibuat, simpan segera).
+APPROVAL_ENGINE_BASE_URL=http://localhost:8000
+APPROVAL_ENGINE_API_KEY=your-approval-engine-api-key
 ```
 
-Jangan commit `.env` dan jangan mengirim token melalui chat.
+Jangan commit `.env` dan jangan mengirim token/api key melalui chat.
+
+### Approval Engine integration
+
+Sejak integrasi dengan `Approval-Engine-Service` (lihat
+[docs/approval-engine-integration-plan.md](docs/approval-engine-integration-plan.md) dan
+[docs/backend-milestones.md](docs/backend-milestones.md)), behavior berikut berubah:
+
+- `POST /api/v1/requests` kini juga mendaftarkan request ke Approval Engine secara
+  backend-to-backend. Kalau engine tidak bisa dihubungi, request tetap tersimpan lokal
+  dengan `approval_status=PENDING_ENGINE_SYNC` (response ke user tetap sukses).
+- `POST /api/v1/approvals/{id}/action` kini benar-benar memanggil keputusan approver ke
+  engine; error bisnis dari engine (mis. bukan approver yang ditugaskan) diteruskan sebagai
+  `400`.
+- Jalankan `go run ./cmd/retrypendingsync` secara berkala (mis. via cron) untuk
+  menyinkronkan ulang request yang sempat gagal terdaftar ke engine
+  (`approval_status=PENDING_ENGINE_SYNC`). Tool ini keluar dengan exit code 1 kalau masih
+  ada yang gagal, supaya wrapper cron bisa alert.
+- Jalankan `go run ./cmd/syncparticipants` setelah ada perubahan data user/organisasi, supaya
+  Approval Engine tahu struktur atasan-bawahan terbaru untuk resolusi approver.
+
+**Rotasi `APPROVAL_ENGINE_API_KEY`:** `api_key` hanya ditampilkan sekali saat
+`POST /api/v1/applications` dipanggil di `Approval-Engine-Service` — tidak bisa diambil ulang.
+Untuk rotasi: registrasikan ulang application (`code` boleh sama, akan dapat `api_key` baru),
+update `APPROVAL_ENGINE_API_KEY` di `.env`/secret manager deployment, lalu restart service.
+Key lama tetap valid sampai application lama di-nonaktifkan secara manual di sisi engine
+(belum ada endpoint deaktivasi application per key — dicatat sebagai gap di plan
+`Approval-Engine-Service`).
 
 ### 4. Test dan jalankan
 
