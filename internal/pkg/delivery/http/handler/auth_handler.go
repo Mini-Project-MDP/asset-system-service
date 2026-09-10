@@ -59,8 +59,17 @@ func (h *AuthHandler) GetMe(c fiber.Ctx) error {
 	}
 
 	profile, err := h.authService.GetCurrentUserProfile(c.Context(), claims.UserID)
-	if err != nil {
-		return response.Error(c, fiber.StatusInternalServerError, err.Error())
+	if err != nil || profile == nil {
+		if claims.Email != "" {
+			profile, err = h.authService.GetCurrentUserProfile(c.Context(), claims.Email)
+		}
+		if (err != nil || profile == nil) && claims.EmployeeNo != "" {
+			profile, err = h.authService.GetCurrentUserProfile(c.Context(), claims.EmployeeNo)
+		}
+	}
+
+	if err != nil || profile == nil {
+		return response.Error(c, fiber.StatusNotFound, "user not found")
 	}
 
 	return response.Success(c, profile)
