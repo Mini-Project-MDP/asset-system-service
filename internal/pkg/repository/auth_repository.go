@@ -45,12 +45,12 @@ func (r *authRepository) GetUserByID(ctx context.Context, id string) (*domain.Us
 	query := `
 		SELECT id, employee_no, name, email, password_hash, status, is_master, version, created_at, updated_at
 		FROM users
-		WHERE id = ?
+		WHERE id = ? OR employee_no = ? OR email = ?
 		LIMIT 1
 	`
 	var u domain.User
 	var isMasterInt int
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
+	err := r.db.QueryRowContext(ctx, query, id, id, id).Scan(
 		&u.ID, &u.EmployeeNo, &u.Name, &u.Email, &u.PasswordHash, &u.Status, &isMasterInt, &u.Version, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
