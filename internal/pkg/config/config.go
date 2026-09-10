@@ -89,18 +89,10 @@ func loadFromEnvironment(lookup environmentLookup) (Config, error) {
 		jwtExpiryDuration = defaultJWTExpiry
 	}
 
-	// Required so the service fails fast at startup if misconfigured, rather
-	// than only surfacing "engine unreachable" the first time a request or
-	// approval action actually needs it. See
-	// docs/approval-engine-integration-plan.md.
-	approvalEngineBaseURL, err := requiredValue(lookup, "APPROVAL_ENGINE_BASE_URL")
-	if err != nil {
-		return Config{}, err
-	}
-	approvalEngineAPIKey, err := requiredValue(lookup, "APPROVAL_ENGINE_API_KEY")
-	if err != nil {
-		return Config{}, err
-	}
+	// Optional: approval engine integration. Service starts without it;
+	// approval actions will fail gracefully if not configured.
+	approvalEngineBaseURL := valueOrDefault(lookup, "APPROVAL_ENGINE_BASE_URL", "")
+	approvalEngineAPIKey := valueOrDefault(lookup, "APPROVAL_ENGINE_API_KEY", "")
 
 	allowedOriginsStr := valueOrDefault(lookup, "ALLOWED_ORIGINS", "")
 	var allowedOrigins []string
