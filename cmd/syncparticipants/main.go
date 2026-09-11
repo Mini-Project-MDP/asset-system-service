@@ -27,8 +27,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/config"
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/database"
-	"github.com/joho/godotenv"
 )
 
 // participant mirrors Approval-Engine-Service's internal/domain.Participant
@@ -51,17 +51,18 @@ func main() {
 }
 
 func run() error {
-	_ = godotenv.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
 
-	dbURL := requireEnv("TURSO_DATABASE_URL")
-	dbToken := requireEnv("TURSO_AUTH_TOKEN")
 	engineBaseURL := requireEnv("APPROVAL_ENGINE_BASE_URL")
 	engineAPIKey := requireEnv("APPROVAL_ENGINE_API_KEY")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	db, err := database.OpenTurso(ctx, dbURL, dbToken)
+	db, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
 	}

@@ -60,7 +60,7 @@ func loadFromEnvironment(lookup environmentLookup) (Config, error) {
 		return Config{}, fmt.Errorf("PORT/APP_PORT: %w", err)
 	}
 
-	databaseURL, err := requiredValue(lookup, "TURSO_DATABASE_URL")
+	databaseURL, err := resolveDatabaseURL(lookup)
 	if err != nil {
 		return Config{}, err
 	}
@@ -68,9 +68,9 @@ func loadFromEnvironment(lookup environmentLookup) (Config, error) {
 		return Config{}, err
 	}
 
-	databaseAuthToken, err := requiredValue(lookup, "TURSO_AUTH_TOKEN")
-	if err != nil {
-		return Config{}, err
+	databaseAuthToken := valueOrDefault(lookup, "TURSO_AUTH_TOKEN", valueOrDefault(lookup, "DATABASE_AUTH_TOKEN", ""))
+	if strings.HasPrefix(databaseURL, "libsql://") && databaseAuthToken == "" {
+		return Config{}, fmt.Errorf("TURSO_AUTH_TOKEN is required for libsql databases")
 	}
 
 	databasePingTimeout, err := time.ParseDuration(valueOrDefault(
@@ -118,6 +118,46 @@ func loadFromEnvironment(lookup environmentLookup) (Config, error) {
 	}, nil
 }
 
+func resolveDatabaseURL(lookup environmentLookup) (string, error) {
+	for _, key := range []string{"DATABASE_URL", "SUPABASE_DATABASE_URL", "POSTGRES_URL", "TURSO_DATABASE_URL"} {
+		if val, ok := lookup(key); ok && strings.TrimSpace(val) != "" {
+			return strings.TrimSpace(val), nil
+		}
+	}
+
+	// If individual DB host is provided, construct PostgreSQL connection URL
+	if host, ok := lookup("DB_HOST"); ok && strings.TrimSpace(host) != "" {
+		host = strings.TrimSpace(host)
+		port := valueOrDefault(lookup, "DB_PORT", "5432")
+		user := valueOrDefault(lookup, "DB_USER", "postgres")
+		pass := valueOrDefault(lookup, "DB_PASSWORD", "")
+		dbName := valueOrDefault(lookup, "DB_NAME", "postgres")
+		sslMode := valueOrDefault(lookup, "DB_SSLMODE", "require")
+
+		var userInfo *url.Userinfo
+		if pass != "" {
+			userInfo = url.UserPassword(user, pass)
+		} else if user != "" {
+			userInfo = url.User(user)
+		}
+
+		u := &url.URL{
+			Scheme: "postgres",
+			User:   userInfo,
+			Host:   fmt.Sprintf("%s:%s", host, port),
+			Path:   "/" + strings.TrimPrefix(dbName, "/"),
+		}
+		if sslMode != "" {
+			q := u.Query()
+			q.Set("sslmode", sslMode)
+			u.RawQuery = q.Encode()
+		}
+		return u.String(), nil
+	}
+
+	return "", fmt.Errorf("DATABASE_URL is required")
+}
+
 func valueOrDefault(lookup environmentLookup, key, fallback string) string {
 	if value, ok := lookup(key); ok && strings.TrimSpace(value) != "" {
 		return strings.TrimSpace(value)
@@ -145,18 +185,18 @@ func parsePort(value string) (int, error) {
 func validateDatabaseURL(value string) error {
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Host == "" {
-		return fmt.Errorf("TURSO_DATABASE_URL must be a valid remote database URL")
+		return fmt.Errorf("DATABASE_URL must be a valid database URL")
 	}
 
 	switch parsed.Scheme {
+	case "postgres", "postgresql":
+		return nil
 	case "libsql", "https", "http", "wss", "ws":
+		if parsed.User != nil || parsed.RawQuery != "" {
+			return fmt.Errorf("TURSO_DATABASE_URL must not contain credentials or query parameters")
+		}
+		return nil
 	default:
-		return fmt.Errorf("TURSO_DATABASE_URL uses an unsupported URL scheme")
+		return fmt.Errorf("DATABASE_URL uses an unsupported URL scheme %q", parsed.Scheme)
 	}
-
-	if parsed.User != nil || parsed.RawQuery != "" {
-		return fmt.Errorf("TURSO_DATABASE_URL must not contain credentials or query parameters")
-	}
-
-	return nil
 }

@@ -47,10 +47,9 @@ func run() error {
 		context.Background(),
 		applicationConfig.DatabasePingTimeout,
 	)
-	databaseConnection, err := database.OpenTurso(
+	databaseConnection, err := database.Open(
 		databaseContext,
 		applicationConfig.DatabaseURL,
-		applicationConfig.DatabaseAuthToken,
 	)
 	cancelDatabaseContext()
 	if err != nil {
@@ -97,7 +96,7 @@ func run() error {
 	}()
 
 	log.Printf(
-		"asset-system-service started on %s in %s mode; Turso connection ready",
+		"asset-system-service started on %s in %s mode; Supabase PostgreSQL connection ready",
 		applicationConfig.Address(),
 		applicationConfig.AppEnvironment,
 	)

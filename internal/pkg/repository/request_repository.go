@@ -165,7 +165,7 @@ func (repo *requestRepository) ListAll(ctx context.Context) ([]domain.AssetReque
 }
 
 func (repo *requestRepository) GetByID(ctx context.Context, id string) (*domain.AssetRequest, error) {
-	row := repo.db.QueryRowContext(ctx, `SELECT`+requestSelectColumns+requestSelectFrom+`WHERE ar.id = ?`, id)
+	row := repo.db.QueryRowContext(ctx, `SELECT`+requestSelectColumns+requestSelectFrom+`WHERE ar.id = $1`, id)
 	item, err := scanAssetRequest(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -226,7 +226,7 @@ func (repo *requestRepository) ResolveRequester(ctx context.Context, nameOrEmail
 		FROM users u
 		LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.is_primary = 1
 		LEFT JOIN roles r ON r.id = ur.role_id
-		WHERE u.name = ? OR u.email = ?
+		WHERE u.name = $1 OR u.email = $2
 		LIMIT 1
 	`, nameOrEmail, nameOrEmail).Scan(&info.UserID, &info.EmployeeNo, &approvalRank)
 	if err != nil {
@@ -244,22 +244,22 @@ func (repo *requestRepository) Create(ctx context.Context, requesterID string, i
 
 	// Resolve category to its asset_type_id so it survives a read-back
 	var assetTypeID sql.NullString
-	_ = repo.db.QueryRowContext(ctx, `SELECT id FROM asset_types WHERE code = ? OR name = ? LIMIT 1`, input.Category, input.Category).Scan(&assetTypeID)
+	_ = repo.db.QueryRowContext(ctx, `SELECT id FROM asset_types WHERE code = $1 OR name = $2 LIMIT 1`, input.Category, input.Category).Scan(&assetTypeID)
 
 	var outletID sql.NullString
 	if input.Outlet != "" {
-		_ = repo.db.QueryRowContext(ctx, `SELECT id FROM outlets WHERE name = ? OR code = ? LIMIT 1`, input.Outlet, input.Outlet).Scan(&outletID)
+		_ = repo.db.QueryRowContext(ctx, `SELECT id FROM outlets WHERE name = $1 OR code = $2 LIMIT 1`, input.Outlet, input.Outlet).Scan(&outletID)
 	}
 
 	var distributorID sql.NullString
 	if input.Distributor != "" {
-		_ = repo.db.QueryRowContext(ctx, `SELECT id FROM distributors WHERE name = ? OR code = ? LIMIT 1`, input.Distributor, input.Distributor).Scan(&distributorID)
+		_ = repo.db.QueryRowContext(ctx, `SELECT id FROM distributors WHERE name = $1 OR code = $2 LIMIT 1`, input.Distributor, input.Distributor).Scan(&distributorID)
 	}
 
 	_, err := repo.db.ExecContext(ctx, `
 		INSERT INTO asset_requests
 			(id, requester_id, asset_type_id, outlet_id, distributor_id, sales_division, request_type, quantity, priority, status, current_step, fulfillment_step, revised_from_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, NULL, $11)
 	`, id, requesterID, assetTypeID, outletID, distributorID, input.SalesDivision, input.ReqType, input.Qty, input.Priority, domain.RequestStatusWaitingApproval, input.RevisedFromID)
 	if err != nil {
 		return "", fmt.Errorf("insert asset request: %w", err)
@@ -269,7 +269,7 @@ func (repo *requestRepository) Create(ctx context.Context, requesterID string, i
 
 func (repo *requestRepository) ListPendingApprovalSync(ctx context.Context) ([]domain.AssetRequest, error) {
 	rows, err := repo.db.QueryContext(ctx,
-		`SELECT`+requestSelectColumns+requestSelectFrom+`WHERE ar.approval_status = ? ORDER BY ar.created_at ASC`,
+		`SELECT`+requestSelectColumns+requestSelectFrom+`WHERE ar.approval_status = $1 ORDER BY ar.created_at ASC`,
 		domain.ApprovalSyncPending,
 	)
 	if err != nil {
@@ -293,7 +293,7 @@ func (repo *requestRepository) ListPendingApprovalSync(ctx context.Context) ([]d
 
 func (repo *requestRepository) SetApprovalDecisionResult(ctx context.Context, id, localStatus, engineStatus string, currentStepOrder int, currentStepName *string) error {
 	if _, err := repo.db.ExecContext(ctx,
-		`UPDATE asset_requests SET status = ?, current_step = ?, approval_status = ?, current_step_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		`UPDATE asset_requests SET status = $1, current_step = $2, approval_status = $3, current_step_name = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5`,
 		localStatus, currentStepOrder, engineStatus, currentStepName, id,
 	); err != nil {
 		return fmt.Errorf("set approval decision result for %s: %w", id, err)
@@ -303,7 +303,7 @@ func (repo *requestRepository) SetApprovalDecisionResult(ctx context.Context, id
 
 func (repo *requestRepository) SaveFulfillmentData(ctx context.Context, id, fulfillData string) error {
 	if _, err := repo.db.ExecContext(ctx,
-		`UPDATE asset_requests SET fulfillment_data = ?, fulfillment_step = 1, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		`UPDATE asset_requests SET fulfillment_data = $1, fulfillment_step = 1, status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
 		fulfillData, domain.RequestStatusFulfillment, id,
 	); err != nil {
 		return fmt.Errorf("save fulfillment data for %s: %w", id, err)
@@ -313,7 +313,7 @@ func (repo *requestRepository) SaveFulfillmentData(ctx context.Context, id, fulf
 
 func (repo *requestRepository) SetApprovalEngineRef(ctx context.Context, id, approvalRequestID, approvalStatus string, currentStepName *string) error {
 	if _, err := repo.db.ExecContext(ctx,
-		`UPDATE asset_requests SET approval_request_id = ?, approval_status = ?, current_step_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		`UPDATE asset_requests SET approval_request_id = $1, approval_status = $2, current_step_name = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4`,
 		approvalRequestID, approvalStatus, currentStepName, id,
 	); err != nil {
 		return fmt.Errorf("set approval engine ref for %s: %w", id, err)
@@ -323,7 +323,7 @@ func (repo *requestRepository) SetApprovalEngineRef(ctx context.Context, id, app
 
 func (repo *requestRepository) SetApprovalSyncPending(ctx context.Context, id string) error {
 	if _, err := repo.db.ExecContext(ctx,
-		`UPDATE asset_requests SET approval_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		`UPDATE asset_requests SET approval_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
 		domain.ApprovalSyncPending, id,
 	); err != nil {
 		return fmt.Errorf("set approval sync pending for %s: %w", id, err)
@@ -335,9 +335,9 @@ func (repo *requestRepository) AdvanceFulfillment(ctx context.Context, id string
 	if _, err := repo.db.ExecContext(ctx, `
 		UPDATE asset_requests
 		SET fulfillment_step = COALESCE(fulfillment_step, 0) + 1,
-			status = CASE WHEN COALESCE(fulfillment_step, 0) + 1 >= 4 THEN ? ELSE ? END,
+			status = CASE WHEN COALESCE(fulfillment_step, 0) + 1 >= 4 THEN $1 ELSE $2 END,
 			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
+		WHERE id = $3
 	`, domain.RequestStatusCompleted, domain.RequestStatusFulfillment, id); err != nil {
 		return fmt.Errorf("advance fulfillment for %s: %w", id, err)
 	}
@@ -351,7 +351,7 @@ func (repo *requestRepository) SaveApprovalSteps(ctx context.Context, requestID 
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM request_approval_steps WHERE request_id = ?`, requestID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM request_approval_steps WHERE request_id = $1`, requestID); err != nil {
 		return fmt.Errorf("delete old approval steps: %w", err)
 	}
 
@@ -364,7 +364,7 @@ func (repo *requestRepository) SaveApprovalSteps(ctx context.Context, requestID 
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO request_approval_steps (id, request_id, step_order, role_code, role_label, status)
-			VALUES (?, ?, ?, ?, ?, ?)
+			VALUES ($1, $2, $3, $4, $5, $6)
 		`, stepID, requestID, i+1, roleCode, roleLabel, step.Status); err != nil {
 			return fmt.Errorf("insert approval step: %w", err)
 		}
@@ -377,7 +377,7 @@ func (repo *requestRepository) GetApprovalSteps(ctx context.Context, requestID s
 	rows, err := repo.db.QueryContext(ctx, `
 		SELECT role_code, role_label, status
 		FROM request_approval_steps
-		WHERE request_id = ?
+		WHERE request_id = $1
 		ORDER BY step_order ASC
 	`, requestID)
 	if err != nil {
@@ -404,7 +404,7 @@ func (repo *requestRepository) AddHistory(ctx context.Context, requestID string,
 	}
 	_, err := repo.db.ExecContext(ctx, `
 		INSERT INTO request_history (id, request_id, role, action, event_type, comment)
-		VALUES (?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`, histID, requestID, item.Role, item.Action, eventType, item.Comment)
 	if err != nil {
 		return fmt.Errorf("insert request history: %w", err)
@@ -416,7 +416,7 @@ func (repo *requestRepository) GetHistory(ctx context.Context, requestID string)
 	rows, err := repo.db.QueryContext(ctx, `
 		SELECT role, action, event_type, comment, created_at
 		FROM request_history
-		WHERE request_id = ?
+		WHERE request_id = $1
 		ORDER BY created_at ASC
 	`, requestID)
 	if err != nil {

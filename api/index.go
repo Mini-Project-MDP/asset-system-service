@@ -39,10 +39,9 @@ func initialize() error {
 	)
 	defer cancelDatabaseContext()
 
-	databaseConnection, err := database.OpenTurso(
+	databaseConnection, err := database.Open(
 		databaseContext,
 		applicationConfig.DatabaseURL,
-		applicationConfig.DatabaseAuthToken,
 	)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)

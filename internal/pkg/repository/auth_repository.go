@@ -23,7 +23,7 @@ func (r *authRepository) GetUserByEmailOrUsername(ctx context.Context, identifie
 	query := `
 		SELECT id, employee_no, name, email, password_hash, status, is_master, version, created_at, updated_at
 		FROM users
-		WHERE email = ? OR employee_no = ?
+		WHERE email = $1 OR employee_no = $2
 		LIMIT 1
 	`
 	var u domain.User
@@ -45,7 +45,7 @@ func (r *authRepository) GetUserByID(ctx context.Context, id string) (*domain.Us
 	query := `
 		SELECT id, employee_no, name, email, password_hash, status, is_master, version, created_at, updated_at
 		FROM users
-		WHERE id = ? OR employee_no = ? OR email = ?
+		WHERE id = $1 OR employee_no = $2 OR email = $3
 		LIMIT 1
 	`
 	var u domain.User
@@ -68,7 +68,7 @@ func (r *authRepository) GetUserRoles(ctx context.Context, userID string) ([]dom
 		SELECT r.id, r.code, r.name, r.role_type, r.approval_rank, r.is_active
 		FROM roles r
 		INNER JOIN user_roles ur ON ur.role_id = r.id
-		WHERE ur.user_id = ? AND r.is_active = 1
+		WHERE ur.user_id = $1 AND r.is_active = 1
 	`
 	rows, err := r.db.QueryContext(ctx, query, userID)
 	if err != nil {
@@ -95,7 +95,7 @@ func (r *authRepository) GetUserPermissions(ctx context.Context, userID string) 
 		FROM permissions p
 		INNER JOIN role_permissions rp ON rp.permission_id = p.id
 		INNER JOIN user_roles ur ON ur.role_id = rp.role_id
-		WHERE ur.user_id = ? AND p.is_active = 1
+		WHERE ur.user_id = $1 AND p.is_active = 1
 	`
 	rows, err := r.db.QueryContext(ctx, query, userID)
 	if err != nil {
@@ -115,7 +115,7 @@ func (r *authRepository) GetUserPermissions(ctx context.Context, userID string) 
 }
 
 func (r *authRepository) GetUserSettings(ctx context.Context, userID string) (*domain.UserSettingDto, error) {
-	query := `SELECT theme, email_notifications FROM user_settings WHERE user_id = ? LIMIT 1`
+	query := `SELECT theme, email_notifications FROM user_settings WHERE user_id = $1 LIMIT 1`
 	var settings domain.UserSettingDto
 	var emailNotifInt int
 	err := r.db.QueryRowContext(ctx, query, userID).Scan(&settings.Theme, &emailNotifInt)
@@ -137,11 +137,11 @@ func (r *authRepository) UpdateUserSettings(ctx context.Context, userID string, 
 
 	query := `
 		INSERT INTO user_settings (user_id, theme, email_notifications, updated_at)
-		VALUES (?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT(user_id) DO UPDATE SET
-			theme = excluded.theme,
-			email_notifications = excluded.email_notifications,
-			updated_at = excluded.updated_at
+			theme = EXCLUDED.theme,
+			email_notifications = EXCLUDED.email_notifications,
+			updated_at = EXCLUDED.updated_at
 	`
 	_, err := r.db.ExecContext(ctx, query, userID, req.Theme, emailNotifInt, time.Now())
 	if err != nil {
@@ -155,7 +155,7 @@ func (r *authRepository) UpdateMasterUserStatus(ctx context.Context, userID stri
 	if isMaster {
 		isMasterInt = 1
 	}
-	query := `UPDATE users SET is_master = ?, updated_at = ? WHERE id = ?`
+	query := `UPDATE users SET is_master = $1, updated_at = $2 WHERE id = $3`
 	res, err := r.db.ExecContext(ctx, query, isMasterInt, time.Now(), userID)
 	if err != nil {
 		return fmt.Errorf("update master status: %w", err)
@@ -199,7 +199,7 @@ func (r *authRepository) getRolePermissions(ctx context.Context, roleID string) 
 		SELECT p.id, p.code, p.name, COALESCE(p.description, '')
 		FROM permissions p
 		INNER JOIN role_permissions rp ON rp.permission_id = p.id
-		WHERE rp.role_id = ?
+		WHERE rp.role_id = $1
 	`
 	rows, err := r.db.QueryContext(ctx, query, roleID)
 	if err != nil {
@@ -225,7 +225,7 @@ func (r *authRepository) CreateRole(ctx context.Context, req domain.CreateRoleRe
 	}
 	query := `
 		INSERT INTO roles (id, code, name, role_type, approval_rank, is_active, version)
-		VALUES (?, ?, ?, ?, ?, 1, 1)
+		VALUES ($1, $2, $3, $4, $5, 1, 1)
 	`
 	_, err := r.db.ExecContext(ctx, query, roleID, req.Code, req.Name, req.RoleType, req.ApprovalRank)
 	if err != nil {
@@ -268,7 +268,7 @@ func (r *authRepository) AssignPermissionsToRole(ctx context.Context, roleID str
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM role_permissions WHERE role_id = ?`, roleID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM role_permissions WHERE role_id = $1`, roleID); err != nil {
 		return err
 	}
 
@@ -276,7 +276,7 @@ func (r *authRepository) AssignPermissionsToRole(ctx context.Context, roleID str
 		if pid == "" {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, roleID, pid); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)`, roleID, pid); err != nil {
 			return err
 		}
 	}
@@ -291,7 +291,7 @@ func (r *authRepository) AssignRolesToUser(ctx context.Context, userID string, r
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM user_roles WHERE user_id = ?`, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID); err != nil {
 		return err
 	}
 
@@ -304,7 +304,7 @@ func (r *authRepository) AssignRolesToUser(ctx context.Context, userID string, r
 		if idx == 0 {
 			isPrimary = 1
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO user_roles (id, user_id, role_id, is_primary) VALUES (?, ?, ?, ?)`, urID, userID, rid, isPrimary); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO user_roles (id, user_id, role_id, is_primary) VALUES ($1, $2, $3, $4)`, urID, userID, rid, isPrimary); err != nil {
 			return err
 		}
 	}

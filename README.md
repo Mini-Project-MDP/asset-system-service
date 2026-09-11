@@ -1,8 +1,8 @@
 # Asset System Service
 
-Backend Asset Management System menggunakan Go, Gin, dan Turso/libSQL.
+Backend Asset Management System menggunakan Go, Fiber, dan PostgreSQL (Supabase).
 
-Saat ini tersedia: HTTP server, environment configuration, koneksi Turso, health check, readiness check, automated tests, serta skeleton modular untuk business feature. Endpoint bisnis belum diimplementasikan.
+Saat ini tersedia: HTTP server, environment configuration, koneksi Supabase PostgreSQL, health check, readiness check, automated tests, serta skeleton modular untuk business feature. Endpoint bisnis belum diimplementasikan.
 
 ## Setup
 
@@ -37,8 +37,7 @@ APP_ENV=development
 APP_PORT=8080
 DATABASE_PING_TIMEOUT=5s
 
-TURSO_DATABASE_URL=libsql://your-database.turso.io
-TURSO_AUTH_TOKEN=your-auth-token
+DATABASE_URL=postgres://postgres.your-project-id:your-password@aws-0-region.pooler.supabase.com:5432/postgres?sslmode=require
 
 # Approval Engine integration — lihat docs/approval-engine-integration-plan.md.
 # api_key didapat dari POST /api/v1/applications di Approval-Engine-Service
@@ -84,7 +83,7 @@ go vet ./...
 go run ./cmd/api
 ```
 
-Aplikasi akan berhenti jika konfigurasi tidak valid atau Turso tidak dapat dihubungi.
+Aplikasi akan berhenti jika konfigurasi tidak valid atau database tidak dapat dihubungi.
 
 ### 5. Verifikasi
 
@@ -114,8 +113,13 @@ Hentikan server dengan `Ctrl+C`.
 | `APP_ENV` | Tidak | `development` | Nama environment |
 | `APP_PORT` | Tidak | `8080` | Port API |
 | `DATABASE_PING_TIMEOUT` | Tidak | `5s` | Timeout database ping |
-| `TURSO_DATABASE_URL` | Ya | - | URL database Turso |
-| `TURSO_AUTH_TOKEN` | Ya | - | Token Turso |
+| `DATABASE_URL` | Ya | - | URL database PostgreSQL / Supabase |
+| `DB_HOST` | Opsional | - | Host Supabase/PostgreSQL alternatif |
+| `DB_PORT` | Opsional | `5432` | Port database |
+| `DB_USER` | Opsional | `postgres` | User database |
+| `DB_PASSWORD` | Opsional | - | Password database |
+| `DB_NAME` | Opsional | `postgres` | Nama database |
+| `DB_SSLMODE` | Opsional | `require` | SSL mode koneksi database |
 
 Environment variable dari sistem/hosting memiliki prioritas lebih tinggi daripada `.env`.
 
@@ -124,7 +128,7 @@ Environment variable dari sistem/hosting memiliki prioritas lebih tinggi daripad
 | Method | Endpoint | Fungsi |
 |---|---|---|
 | `GET` | `/health` | Memastikan API hidup |
-| `GET` | `/ready` | Memastikan API dan Turso siap |
+| `GET` | `/ready` | Memastikan API dan Database siap |
 
 `/ready` menghasilkan `503 Service Unavailable` jika database tidak dapat dihubungi.
 
@@ -185,7 +189,7 @@ Get-NetTCPConnection -LocalPort 8080 -State Listen
 
 Ganti port melalui `.env`, misalnya `APP_PORT=8081`, lalu jalankan ulang API.
 
-### Turso gagal terhubung
+### Database gagal terhubung
 
 Pastikan `.env` berada sejajar dengan `go.mod`, URL dimulai dengan `libsql://`, dan token masih aktif. Jangan sertakan token saat membagikan error.
 

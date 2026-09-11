@@ -6,10 +6,9 @@ import (
 	"time"
 )
 
-func TestLoadFromEnvironment(t *testing.T) {
+func TestLoadFromEnvironmentPostgres(t *testing.T) {
 	values := map[string]string{
-		"TURSO_DATABASE_URL":       "libsql://example.turso.io",
-		"TURSO_AUTH_TOKEN":         "test-token",
+		"DATABASE_URL":             "postgres://user:pass@localhost:5432/testdb?sslmode=disable",
 		"APPROVAL_ENGINE_BASE_URL": "http://localhost:8000",
 		"APPROVAL_ENGINE_API_KEY":  "test-engine-key",
 	}
@@ -31,12 +30,35 @@ func TestLoadFromEnvironment(t *testing.T) {
 	if config.Address() != ":8080" {
 		t.Fatalf("expected address :8080, got %s", config.Address())
 	}
+	if config.DatabaseURL != "postgres://user:pass@localhost:5432/testdb?sslmode=disable" {
+		t.Fatalf("unexpected database URL: %s", config.DatabaseURL)
+	}
+}
+
+func TestLoadFromEnvironmentIndividualDBVars(t *testing.T) {
+	values := map[string]string{
+		"DB_HOST":     "example.supabase.co",
+		"DB_PORT":     "5432",
+		"DB_USER":     "myuser",
+		"DB_PASSWORD": "mypassword",
+		"DB_NAME":     "mydb",
+		"DB_SSLMODE":  "require",
+	}
+
+	config, err := loadFromEnvironment(mapLookup(values))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	expectedPrefix := "postgres://myuser:mypassword@example.supabase.co:5432/mydb"
+	if !strings.HasPrefix(config.DatabaseURL, expectedPrefix) {
+		t.Fatalf("expected %q prefix, got %q", expectedPrefix, config.DatabaseURL)
+	}
 }
 
 func TestLoadFromEnvironmentWithPort(t *testing.T) {
 	values := map[string]string{
-		"TURSO_DATABASE_URL":       "libsql://example.turso.io",
-		"TURSO_AUTH_TOKEN":         "test-token",
+		"DATABASE_URL":             "postgres://user:pass@localhost:5432/testdb",
 		"APPROVAL_ENGINE_BASE_URL": "http://localhost:8000",
 		"APPROVAL_ENGINE_API_KEY":  "test-engine-key",
 		"PORT":                     "40399",
@@ -63,13 +85,13 @@ func TestLoadFromEnvironmentRequiresDatabaseConfiguration(t *testing.T) {
 	}{
 		{
 			name:     "missing URL",
-			values:   map[string]string{"TURSO_AUTH_TOKEN": "test-token"},
-			expected: "TURSO_DATABASE_URL is required",
+			values:   map[string]string{"APP_PORT": "8080"},
+			expected: "DATABASE_URL is required",
 		},
 		{
-			name:     "missing token",
+			name:     "missing token for libsql",
 			values:   map[string]string{"TURSO_DATABASE_URL": "libsql://example.turso.io"},
-			expected: "TURSO_AUTH_TOKEN is required",
+			expected: "TURSO_AUTH_TOKEN is required for libsql databases",
 		},
 	}
 
@@ -85,8 +107,7 @@ func TestLoadFromEnvironmentRequiresDatabaseConfiguration(t *testing.T) {
 
 func TestLoadFromEnvironmentApprovalEngineOptional(t *testing.T) {
 	cfg, err := loadFromEnvironment(mapLookup(map[string]string{
-		"TURSO_DATABASE_URL": "libsql://example.turso.io",
-		"TURSO_AUTH_TOKEN":   "test-token",
+		"DATABASE_URL": "postgres://user:pass@localhost:5432/testdb",
 	}))
 	if err != nil {
 		t.Fatalf("expected no error when approval engine env vars are omitted, got %v", err)
@@ -98,7 +119,6 @@ func TestLoadFromEnvironmentApprovalEngineOptional(t *testing.T) {
 		t.Fatalf("expected empty ApprovalEngineAPIKey, got %q", cfg.ApprovalEngineAPIKey)
 	}
 }
-
 
 func TestLoadFromEnvironmentValidatesValues(t *testing.T) {
 	tests := []struct {
@@ -114,16 +134,10 @@ func TestLoadFromEnvironmentValidatesValues(t *testing.T) {
 			expected: "APP_PORT",
 		},
 		{
-			name:     "invalid database URL",
-			key:      "TURSO_DATABASE_URL",
-			value:    "postgres://example.com/database",
-			expected: "TURSO_DATABASE_URL",
-		},
-		{
-			name:     "token embedded in URL",
-			key:      "TURSO_DATABASE_URL",
-			value:    "libsql://example.turso.io?authToken=secret",
-			expected: "must not contain credentials",
+			name:     "invalid database URL scheme",
+			key:      "DATABASE_URL",
+			value:    "ftp://example.com/database",
+			expected: "unsupported URL scheme",
 		},
 		{
 			name:     "invalid ping timeout",
@@ -136,8 +150,7 @@ func TestLoadFromEnvironmentValidatesValues(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			values := map[string]string{
-				"TURSO_DATABASE_URL":       "libsql://example.turso.io",
-				"TURSO_AUTH_TOKEN":         "test-token",
+				"DATABASE_URL":             "postgres://user:pass@localhost:5432/testdb",
 				"DATABASE_PING_TIMEOUT":    "5s",
 				"APPROVAL_ENGINE_BASE_URL": "http://localhost:8000",
 				"APPROVAL_ENGINE_API_KEY":  "test-engine-key",
