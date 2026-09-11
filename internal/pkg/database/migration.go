@@ -32,15 +32,17 @@ var approvalEngineColumns = []string{
 	"revised_from_id VARCHAR(36)",
 }
 
-// ensureApprovalEngineColumns adds any approvalEngineColumns missing from an
-// existing asset_requests table. SQLite/libSQL has no "ADD COLUMN IF NOT
-// EXISTS", so existing columns are discovered via PRAGMA table_info first.
-func ensureApprovalEngineColumns(ctx context.Context, db *sql.DB) error {
+var requestHistoryColumns = []string{
+	"role VARCHAR(100)",
+	"event_type VARCHAR(20) DEFAULT 'go'",
+}
+
+func ensureTableColumns(ctx context.Context, db *sql.DB, tableName string, columns []string) error {
 	existing := make(map[string]bool)
 
-	rows, err := db.QueryContext(ctx, `PRAGMA table_info(asset_requests)`)
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, tableName))
 	if err != nil {
-		return fmt.Errorf("inspect asset_requests columns: %w", err)
+		return fmt.Errorf("inspect %s columns: %w", tableName, err)
 	}
 	for rows.Next() {
 		var cid int
@@ -49,29 +51,39 @@ func ensureApprovalEngineColumns(ctx context.Context, db *sql.DB) error {
 		var dfltValue sql.NullString
 		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
 			rows.Close()
-			return fmt.Errorf("scan asset_requests column info: %w", err)
+			return fmt.Errorf("scan %s column info: %w", tableName, err)
 		}
 		existing[name] = true
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate asset_requests column info: %w", err)
+		return fmt.Errorf("iterate %s column info: %w", tableName, err)
 	}
 	rows.Close()
 
-	for _, columnDef := range approvalEngineColumns {
+	for _, columnDef := range columns {
 		columnName := columnDef[:strings.IndexByte(columnDef, ' ')]
 		if existing[columnName] {
 			continue
 		}
 		if _, err := db.ExecContext(ctx, fmt.Sprintf(
-			`ALTER TABLE asset_requests ADD COLUMN %s`, columnDef,
+			`ALTER TABLE %s ADD COLUMN %s`, tableName, columnDef,
 		)); err != nil {
-			return fmt.Errorf("add asset_requests.%s: %w", columnName, err)
+			return fmt.Errorf("add %s.%s: %w", tableName, columnName, err)
 		}
-		log.Printf("asset_requests: added missing column %s", columnName)
+		log.Printf("%s: added missing column %s", tableName, columnName)
 	}
 
 	return nil
+}
+
+// ensureApprovalEngineColumns adds any approvalEngineColumns missing from an
+// existing asset_requests or request_history table. SQLite/libSQL has no "ADD COLUMN IF NOT
+// EXISTS", so existing columns are discovered via PRAGMA table_info first.
+func ensureApprovalEngineColumns(ctx context.Context, db *sql.DB) error {
+	if err := ensureTableColumns(ctx, db, "asset_requests", approvalEngineColumns); err != nil {
+		return err
+	}
+	return ensureTableColumns(ctx, db, "request_history", requestHistoryColumns)
 }
 
 // MigrateAndSeed initializes database schema and seeds default data.

@@ -25,6 +25,22 @@ const (
 	ApprovalActionReject   = "reject"
 )
 
+// ApprovalStepItem represents a single step in the approval chain for display in the FE.
+type ApprovalStepItem struct {
+	Role      string `json:"role"`
+	RoleLabel string `json:"roleLabel"`
+	Status    string `json:"status"` // approved, current, pending, rejected, revision
+}
+
+// ApprovalHistoryItem represents one event in the approval history timeline.
+type ApprovalHistoryItem struct {
+	Role    string  `json:"role"`
+	Action  string  `json:"action"`
+	Date    string  `json:"date"`
+	Type    string  `json:"type"` // go, warn, stop
+	Comment *string `json:"comment,omitempty"`
+}
+
 // AssetRequest is one row of asset_requests, joined with the human-readable
 // names of its foreign keys (asset type, outlet, distributor, requester).
 type AssetRequest struct {
@@ -50,6 +66,9 @@ type AssetRequest struct {
 	ApprovalStatus    string  // mirrors the engine's status, or ApprovalSyncPending
 	CurrentStepName   *string // mirrors the engine's active step name
 	RevisedFromID     *string // set when this request is a resubmission after a "revision" decision
+
+	Chain []ApprovalStepItem
+	Hist  []ApprovalHistoryItem
 }
 
 // RequesterInfo is what request_service needs about a requester beyond their
@@ -127,6 +146,14 @@ type RequestRepository interface {
 	// (engine create failed at submission time) — feeds the retry job in
 	// Milestone 7 (see RequestService.RetryPendingApprovalSync).
 	ListPendingApprovalSync(ctx context.Context) ([]AssetRequest, error)
+	// SaveApprovalSteps replaces the cached steps for a request in request_approval_steps.
+	SaveApprovalSteps(ctx context.Context, requestID string, steps []ApprovalStepItem) error
+	// GetApprovalSteps retrieves the cached steps for a request.
+	GetApprovalSteps(ctx context.Context, requestID string) ([]ApprovalStepItem, error)
+	// AddHistory inserts an event into request_history.
+	AddHistory(ctx context.Context, requestID string, item ApprovalHistoryItem) error
+	// GetHistory retrieves the history items for a request.
+	GetHistory(ctx context.Context, requestID string) ([]ApprovalHistoryItem, error)
 }
 
 // RequestService defines business logic for asset requests, approvals, and

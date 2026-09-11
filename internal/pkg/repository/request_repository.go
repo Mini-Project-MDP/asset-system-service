@@ -98,6 +98,69 @@ func (repo *requestRepository) ListAll(ctx context.Context) ([]domain.AssetReque
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate asset request rows: %w", err)
 	}
+
+	if len(items) == 0 {
+		return items, nil
+	}
+
+	// Batch load approval steps for all requests
+	stepRows, sErr := repo.db.QueryContext(ctx, `
+		SELECT request_id, role_code, role_label, status
+		FROM request_approval_steps
+		ORDER BY step_order ASC
+	`)
+	if sErr == nil {
+		defer stepRows.Close()
+		stepsMap := make(map[string][]domain.ApprovalStepItem)
+		for stepRows.Next() {
+			var reqID, role, roleLabel, status string
+			if err := stepRows.Scan(&reqID, &role, &roleLabel, &status); err == nil {
+				stepsMap[reqID] = append(stepsMap[reqID], domain.ApprovalStepItem{
+					Role:      role,
+					RoleLabel: roleLabel,
+					Status:    status,
+				})
+			}
+		}
+		for i := range items {
+			if s, ok := stepsMap[items[i].ID]; ok {
+				items[i].Chain = s
+			} else {
+				items[i].Chain = []domain.ApprovalStepItem{}
+			}
+		}
+	}
+
+	// Batch load history for all requests
+	histRows, hErr := repo.db.QueryContext(ctx, `
+		SELECT request_id, role, action, event_type, comment, created_at
+		FROM request_history
+		ORDER BY created_at ASC
+	`)
+	if hErr == nil {
+		defer histRows.Close()
+		histMap := make(map[string][]domain.ApprovalHistoryItem)
+		for histRows.Next() {
+			var reqID string
+			var roleNS, commentNS sql.NullString
+			var h domain.ApprovalHistoryItem
+			if err := histRows.Scan(&reqID, &roleNS, &h.Action, &h.Type, &commentNS, &h.Date); err == nil {
+				h.Role = roleNS.String
+				if commentNS.Valid {
+					h.Comment = &commentNS.String
+				}
+				histMap[reqID] = append(histMap[reqID], h)
+			}
+		}
+		for i := range items {
+			if h, ok := histMap[items[i].ID]; ok {
+				items[i].Hist = h
+			} else {
+				items[i].Hist = []domain.ApprovalHistoryItem{}
+			}
+		}
+	}
+
 	return items, nil
 }
 
@@ -110,6 +173,21 @@ func (repo *requestRepository) GetByID(ctx context.Context, id string) (*domain.
 		}
 		return nil, fmt.Errorf("get asset request %s: %w", id, err)
 	}
+
+	steps, err := repo.GetApprovalSteps(ctx, id)
+	if err == nil && steps != nil {
+		item.Chain = steps
+	} else {
+		item.Chain = []domain.ApprovalStepItem{}
+	}
+
+	hist, err := repo.GetHistory(ctx, id)
+	if err == nil && hist != nil {
+		item.Hist = hist
+	} else {
+		item.Hist = []domain.ApprovalHistoryItem{}
+	}
+
 	return &item, nil
 }
 
@@ -138,17 +216,24 @@ func (repo *requestRepository) Create(ctx context.Context, requesterID string, i
 	id := "REQ-" + strings.ToUpper(uuid.NewString()[:8])
 
 	// Resolve category to its asset_type_id so it survives a read-back
-	// (previously lost — see the asset_types seeding note in migration.go).
-	// A miss (unknown category) degrades gracefully to NULL, same as
-	// outlet/distributor already do, rather than failing the whole create.
 	var assetTypeID sql.NullString
 	_ = repo.db.QueryRowContext(ctx, `SELECT id FROM asset_types WHERE code = ? OR name = ? LIMIT 1`, input.Category, input.Category).Scan(&assetTypeID)
 
+	var outletID sql.NullString
+	if input.Outlet != "" {
+		_ = repo.db.QueryRowContext(ctx, `SELECT id FROM outlets WHERE name = ? OR code = ? LIMIT 1`, input.Outlet, input.Outlet).Scan(&outletID)
+	}
+
+	var distributorID sql.NullString
+	if input.Distributor != "" {
+		_ = repo.db.QueryRowContext(ctx, `SELECT id FROM distributors WHERE name = ? OR code = ? LIMIT 1`, input.Distributor, input.Distributor).Scan(&distributorID)
+	}
+
 	_, err := repo.db.ExecContext(ctx, `
 		INSERT INTO asset_requests
-			(id, requester_id, asset_type_id, sales_division, request_type, quantity, priority, status, current_step, fulfillment_step, revised_from_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
-	`, id, requesterID, assetTypeID, input.SalesDivision, input.ReqType, input.Qty, input.Priority, domain.RequestStatusWaitingApproval, input.RevisedFromID)
+			(id, requester_id, asset_type_id, outlet_id, distributor_id, sales_division, request_type, quantity, priority, status, current_step, fulfillment_step, revised_from_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+	`, id, requesterID, assetTypeID, outletID, distributorID, input.SalesDivision, input.ReqType, input.Qty, input.Priority, domain.RequestStatusWaitingApproval, input.RevisedFromID)
 	if err != nil {
 		return "", fmt.Errorf("insert asset request: %w", err)
 	}
@@ -231,3 +316,100 @@ func (repo *requestRepository) AdvanceFulfillment(ctx context.Context, id string
 	}
 	return nil
 }
+
+func (repo *requestRepository) SaveApprovalSteps(ctx context.Context, requestID string, steps []domain.ApprovalStepItem) error {
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx save approval steps: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM request_approval_steps WHERE request_id = ?`, requestID); err != nil {
+		return fmt.Errorf("delete old approval steps: %w", err)
+	}
+
+	for i, step := range steps {
+		stepID := uuid.NewString()
+		roleCode := step.Role
+		roleLabel := step.RoleLabel
+		if roleLabel == "" {
+			roleLabel = roleCode
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO request_approval_steps (id, request_id, step_order, role_code, role_label, status)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, stepID, requestID, i+1, roleCode, roleLabel, step.Status); err != nil {
+			return fmt.Errorf("insert approval step: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (repo *requestRepository) GetApprovalSteps(ctx context.Context, requestID string) ([]domain.ApprovalStepItem, error) {
+	rows, err := repo.db.QueryContext(ctx, `
+		SELECT role_code, role_label, status
+		FROM request_approval_steps
+		WHERE request_id = ?
+		ORDER BY step_order ASC
+	`, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("query approval steps: %w", err)
+	}
+	defer rows.Close()
+
+	var steps []domain.ApprovalStepItem
+	for rows.Next() {
+		var s domain.ApprovalStepItem
+		if err := rows.Scan(&s.Role, &s.RoleLabel, &s.Status); err != nil {
+			return nil, fmt.Errorf("scan approval step: %w", err)
+		}
+		steps = append(steps, s)
+	}
+	return steps, rows.Err()
+}
+
+func (repo *requestRepository) AddHistory(ctx context.Context, requestID string, item domain.ApprovalHistoryItem) error {
+	histID := uuid.NewString()
+	eventType := item.Type
+	if eventType == "" {
+		eventType = "go"
+	}
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO request_history (id, request_id, role, action, event_type, comment)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, histID, requestID, item.Role, item.Action, eventType, item.Comment)
+	if err != nil {
+		return fmt.Errorf("insert request history: %w", err)
+	}
+	return nil
+}
+
+func (repo *requestRepository) GetHistory(ctx context.Context, requestID string) ([]domain.ApprovalHistoryItem, error) {
+	rows, err := repo.db.QueryContext(ctx, `
+		SELECT role, action, event_type, comment, created_at
+		FROM request_history
+		WHERE request_id = ?
+		ORDER BY created_at ASC
+	`, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("query request history: %w", err)
+	}
+	defer rows.Close()
+
+	var history []domain.ApprovalHistoryItem
+	for rows.Next() {
+		var h domain.ApprovalHistoryItem
+		var roleNS, commentNS sql.NullString
+		if err := rows.Scan(&roleNS, &h.Action, &h.Type, &commentNS, &h.Date); err != nil {
+			return nil, fmt.Errorf("scan request history: %w", err)
+		}
+		h.Role = roleNS.String
+		if commentNS.Valid {
+			h.Comment = &commentNS.String
+		}
+		history = append(history, h)
+	}
+	return history, rows.Err()
+}
+

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/domain"
 )
@@ -55,6 +56,26 @@ func (s *requestService) Detail(ctx context.Context, id string) (*domain.AssetRe
 	if item == nil {
 		return nil, ErrRequestNotFound
 	}
+
+	// If engine is available and request is synced, refresh engine steps if needed
+	if s.engine != nil && item.ApprovalRequestID != nil && *item.ApprovalRequestID != "" {
+		engReq, engErr := s.engine.GetRequest(ctx, *item.ApprovalRequestID)
+		if engErr == nil && engReq != nil && len(engReq.Steps) > 0 {
+			hasRevision := false
+			for _, h := range item.Hist {
+				if h.Action == "Requested revision" {
+					hasRevision = true
+					break
+				}
+			}
+			steps := mapEngineStepsToItems(engReq, hasRevision)
+			if len(steps) > 0 {
+				_ = s.repo.SaveApprovalSteps(ctx, id, steps)
+				item.Chain = steps
+			}
+		}
+	}
+
 	return item, nil
 }
 
@@ -140,6 +161,50 @@ func (s *requestService) syncToApprovalEngine(ctx context.Context, id string, re
 	if err := s.repo.SetApprovalEngineRef(ctx, id, resp.ID, resp.Status, stepNamePtr); err != nil {
 		log.Printf("request %s: save approval engine ref failed: %v", id, err)
 	}
+
+	stepItems := mapEngineStepsToItems(resp, false)
+	if len(stepItems) > 0 {
+		if err := s.repo.SaveApprovalSteps(ctx, id, stepItems); err != nil {
+			log.Printf("request %s: save approval steps failed: %v", id, err)
+		}
+	}
+	_ = s.repo.AddHistory(ctx, id, domain.ApprovalHistoryItem{
+		Role:   requester.EmployeeNo,
+		Action: "Submitted",
+		Date:   time.Now().Format("02 Jan 2006"),
+		Type:   "go",
+	})
+}
+
+// mapEngineStepsToItems maps Approval-Engine-Service's EngineApprovalStep slice
+// into FE-friendly ApprovalStepItem slice.
+func mapEngineStepsToItems(req *domain.EngineApprovalRequest, actionWasRevision bool) []domain.ApprovalStepItem {
+	if req == nil || len(req.Steps) == 0 {
+		return nil
+	}
+	items := make([]domain.ApprovalStepItem, 0, len(req.Steps))
+	for _, s := range req.Steps {
+		status := "pending"
+		if req.Status == "approved" || s.StepOrder < req.CurrentStepOrder || s.Status == "completed" || s.Status == "approved" {
+			status = "approved"
+		} else if s.StepOrder == req.CurrentStepOrder {
+			if req.Status == "rejected" {
+				if actionWasRevision {
+					status = "revision"
+				} else {
+					status = "rejected"
+				}
+			} else {
+				status = "current"
+			}
+		}
+		items = append(items, domain.ApprovalStepItem{
+			Role:      s.Name,
+			RoleLabel: s.Name,
+			Status:    status,
+		})
+	}
+	return items
 }
 
 // RetryPendingApprovalSync re-attempts CreateRequest for every request stuck
@@ -235,6 +300,31 @@ func (s *requestService) ApprovalAction(ctx context.Context, id string, input do
 	if err := s.repo.SetApprovalDecisionResult(ctx, id, localStatus, resp.Status, resp.CurrentStepOrder, stepNamePtr); err != nil {
 		return nil, err
 	}
+
+	isRevision := input.Action == domain.ApprovalActionRevision
+	stepItems := mapEngineStepsToItems(resp, isRevision)
+	if len(stepItems) > 0 {
+		_ = s.repo.SaveApprovalSteps(ctx, id, stepItems)
+	}
+
+	actionLabel := "Approved"
+	actionType := "go"
+	if input.Action == domain.ApprovalActionRevision {
+		actionLabel = "Requested revision"
+		actionType = "warn"
+	} else if input.Action == domain.ApprovalActionReject {
+		actionLabel = "Rejected"
+		actionType = "stop"
+	}
+
+	_ = s.repo.AddHistory(ctx, id, domain.ApprovalHistoryItem{
+		Role:    input.ActorEmployeeNo,
+		Action:  actionLabel,
+		Date:    time.Now().Format("02 Jan 2006"),
+		Type:    actionType,
+		Comment: input.Comment,
+	})
+
 	return s.Detail(ctx, id)
 }
 

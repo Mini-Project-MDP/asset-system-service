@@ -24,6 +24,8 @@ type fakeRequestRepository struct {
 		id, localStatus, engineStatus string
 		currentStepOrder              int
 	}
+	steps   map[string][]domain.ApprovalStepItem
+	history map[string][]domain.ApprovalHistoryItem
 }
 
 func (f *fakeRequestRepository) ListAll(ctx context.Context) ([]domain.AssetRequest, error) {
@@ -34,6 +36,12 @@ func (f *fakeRequestRepository) GetByID(ctx context.Context, id string) (*domain
 	for i := range f.items {
 		if f.items[i].ID == id {
 			item := f.items[i]
+			if f.steps != nil {
+				item.Chain = f.steps[id]
+			}
+			if f.history != nil {
+				item.Hist = f.history[id]
+			}
 			return &item, nil
 		}
 	}
@@ -125,6 +133,36 @@ func (f *fakeRequestRepository) SetApprovalSyncPending(ctx context.Context, id s
 		}
 	}
 	return nil
+}
+
+func (f *fakeRequestRepository) SaveApprovalSteps(ctx context.Context, requestID string, steps []domain.ApprovalStepItem) error {
+	if f.steps == nil {
+		f.steps = make(map[string][]domain.ApprovalStepItem)
+	}
+	f.steps[requestID] = steps
+	return nil
+}
+
+func (f *fakeRequestRepository) GetApprovalSteps(ctx context.Context, requestID string) ([]domain.ApprovalStepItem, error) {
+	if f.steps == nil {
+		return nil, nil
+	}
+	return f.steps[requestID], nil
+}
+
+func (f *fakeRequestRepository) AddHistory(ctx context.Context, requestID string, item domain.ApprovalHistoryItem) error {
+	if f.history == nil {
+		f.history = make(map[string][]domain.ApprovalHistoryItem)
+	}
+	f.history[requestID] = append(f.history[requestID], item)
+	return nil
+}
+
+func (f *fakeRequestRepository) GetHistory(ctx context.Context, requestID string) ([]domain.ApprovalHistoryItem, error) {
+	if f.history == nil {
+		return nil, nil
+	}
+	return f.history[requestID], nil
 }
 
 // fakeApprovalEngineClient is an in-memory domain.ApprovalEngineClient for

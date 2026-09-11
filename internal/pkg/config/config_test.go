@@ -71,23 +71,6 @@ func TestLoadFromEnvironmentRequiresDatabaseConfiguration(t *testing.T) {
 			values:   map[string]string{"TURSO_DATABASE_URL": "libsql://example.turso.io"},
 			expected: "TURSO_AUTH_TOKEN is required",
 		},
-		{
-			name: "missing approval engine base url",
-			values: map[string]string{
-				"TURSO_DATABASE_URL": "libsql://example.turso.io",
-				"TURSO_AUTH_TOKEN":   "test-token",
-			},
-			expected: "APPROVAL_ENGINE_BASE_URL is required",
-		},
-		{
-			name: "missing approval engine api key",
-			values: map[string]string{
-				"TURSO_DATABASE_URL":       "libsql://example.turso.io",
-				"TURSO_AUTH_TOKEN":         "test-token",
-				"APPROVAL_ENGINE_BASE_URL": "http://localhost:8000",
-			},
-			expected: "APPROVAL_ENGINE_API_KEY is required",
-		},
 	}
 
 	for _, test := range tests {
@@ -99,6 +82,23 @@ func TestLoadFromEnvironmentRequiresDatabaseConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadFromEnvironmentApprovalEngineOptional(t *testing.T) {
+	cfg, err := loadFromEnvironment(mapLookup(map[string]string{
+		"TURSO_DATABASE_URL": "libsql://example.turso.io",
+		"TURSO_AUTH_TOKEN":   "test-token",
+	}))
+	if err != nil {
+		t.Fatalf("expected no error when approval engine env vars are omitted, got %v", err)
+	}
+	if cfg.ApprovalEngineBaseURL != "" {
+		t.Fatalf("expected empty ApprovalEngineBaseURL, got %q", cfg.ApprovalEngineBaseURL)
+	}
+	if cfg.ApprovalEngineAPIKey != "" {
+		t.Fatalf("expected empty ApprovalEngineAPIKey, got %q", cfg.ApprovalEngineAPIKey)
+	}
+}
+
 
 func TestLoadFromEnvironmentValidatesValues(t *testing.T) {
 	tests := []struct {
