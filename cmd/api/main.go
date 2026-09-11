@@ -76,14 +76,16 @@ func run() error {
 	requestService := service.NewRequestService(requestRepo, approvalEngineClient)
 
 	fiberApp := http.NewRouter(http.Dependencies{
-		Database:            databaseConnection,
-		DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
-		TokenManager:        tokenManager,
+		Database:             databaseConnection,
+		DatabasePingTimeout:  applicationConfig.DatabasePingTimeout,
+		TokenManager:         tokenManager,
+		ApprovalEngineAPIKey: applicationConfig.ApprovalEngineAPIKey,
 		Handlers: http.Handlers{
 			Auth:    authHandler,
 			User:    userHandler,
 			Request: handler.NewRequestHandler(requestService),
 			Catalog: handler.NewCatalogHandler(databaseConnection),
+			Webhook: handler.NewWebhookHandler(requestService),
 		},
 	})
 

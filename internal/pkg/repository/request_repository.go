@@ -191,6 +191,33 @@ func (repo *requestRepository) GetByID(ctx context.Context, id string) (*domain.
 	return &item, nil
 }
 
+func (repo *requestRepository) GetByApprovalRequestID(ctx context.Context, approvalRequestID string) (*domain.AssetRequest, error) {
+	row := repo.db.QueryRowContext(ctx, `SELECT`+requestSelectColumns+requestSelectFrom+`WHERE ar.approval_request_id = ?`, approvalRequestID)
+	item, err := scanAssetRequest(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get asset request by approval_request_id %s: %w", approvalRequestID, err)
+	}
+
+	steps, err := repo.GetApprovalSteps(ctx, item.ID)
+	if err == nil && steps != nil {
+		item.Chain = steps
+	} else {
+		item.Chain = []domain.ApprovalStepItem{}
+	}
+
+	hist, err := repo.GetHistory(ctx, item.ID)
+	if err == nil && hist != nil {
+		item.Hist = hist
+	} else {
+		item.Hist = []domain.ApprovalHistoryItem{}
+	}
+
+	return &item, nil
+}
+
 func (repo *requestRepository) ResolveRequester(ctx context.Context, nameOrEmail string) (*domain.RequesterInfo, error) {
 	var info domain.RequesterInfo
 	var approvalRank sql.NullInt64

@@ -343,6 +343,75 @@ func approvalEngineDecision(action string) (string, error) {
 	}
 }
 
+// HandleEngineWebhook re-fetches and mirrors a request's current engine
+// state after a webhook notification. Per Approval-Engine-Service's own
+// contract (Langkah 6, asset-system-integration-checklist.md) delivery order
+// is not guaranteed, so this never trusts event.Detail — it always goes back
+// to GetRequest for the current truth, exactly like the on-demand refresh in
+// Detail.
+func (s *requestService) HandleEngineWebhook(ctx context.Context, event domain.EngineWebhookEvent) error {
+	requestID := strings.TrimSpace(event.RequestID)
+	if requestID == "" {
+		return nil
+	}
+
+	local, err := s.repo.GetByApprovalRequestID(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if local == nil {
+		// Not a request we know about yet (e.g. delivered before our own
+		// CreateRequest response finished saving) — nothing to mirror.
+		// GET /requests/{id} will pick up the state on the next poll/detail
+		// view either way, so this is safe to drop.
+		log.Printf("engine webhook: no local request synced to approval_request_id %s (event %q), ignoring", requestID, event.Event)
+		return nil
+	}
+
+	// Fulfillment/completion is tracked entirely in this service, past what
+	// the engine (or this event) knows about — never let a late or
+	// out-of-order webhook drag a request that has already moved on back to
+	// an approval-stage status.
+	if local.Status == domain.RequestStatusFulfillment || local.Status == domain.RequestStatusCompleted {
+		return nil
+	}
+
+	engReq, err := s.engine.GetRequest(ctx, requestID)
+	if err != nil {
+		return fmt.Errorf("refresh request %s after webhook: %w", local.ID, err)
+	}
+	if engReq == nil {
+		return nil
+	}
+
+	hasRevision := false
+	for _, h := range local.Hist {
+		if h.Action == "Requested revision" {
+			hasRevision = true
+			break
+		}
+	}
+
+	localStatus := localStatusForEngineStatus(engReq.Status)
+	stepName := engReq.CurrentStepName()
+	var stepNamePtr *string
+	if stepName != "" {
+		stepNamePtr = &stepName
+	}
+	if err := s.repo.SetApprovalDecisionResult(ctx, local.ID, localStatus, engReq.Status, engReq.CurrentStepOrder, stepNamePtr); err != nil {
+		return fmt.Errorf("mirror webhook refresh for request %s: %w", local.ID, err)
+	}
+
+	stepItems := mapEngineStepsToItems(engReq, hasRevision)
+	if len(stepItems) > 0 {
+		if err := s.repo.SaveApprovalSteps(ctx, local.ID, stepItems); err != nil {
+			log.Printf("request %s: save approval steps after webhook failed: %v", local.ID, err)
+		}
+	}
+
+	return nil
+}
+
 // localStatusForEngineStatus maps the engine's overall request status
 // ("pending"/"approved"/"rejected") to this service's own status
 // vocabulary. "pending" keeps the request at RequestStatusWaitingApproval —

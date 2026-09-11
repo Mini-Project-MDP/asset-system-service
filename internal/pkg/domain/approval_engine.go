@@ -95,6 +95,27 @@ type ApprovalEngineClient interface {
 	GetRequest(ctx context.Context, approvalRequestID string) (*EngineApprovalRequest, error)
 }
 
+// EngineWebhookEvent mirrors Approval-Engine-Service's
+// internal/service.WebhookEvent JSON shape — the payload it POSTs to our
+// callback_url whenever a request/step changes state (see docs/
+// asset-system-integration-checklist.md Langkah 6 in Approval-Engine-Service).
+// Duplicated here for the same reason as EngineApprovalRequest above: the two
+// services share no Go package.
+//
+// It carries no authoritative state of its own — RequestID only tells us
+// *something* changed on that engine request. The handler treats it purely
+// as a cue to re-fetch GetRequest and mirror the current truth locally,
+// exactly like the existing on-demand refresh in requestService.Detail.
+type EngineWebhookEvent struct {
+	Event      string         `json:"event"`
+	AppID      string         `json:"app_id"`
+	RequestID  string         `json:"request_id"`
+	StepID     *string        `json:"step_id,omitempty"`
+	ActorID    *string        `json:"actor_id,omitempty"`
+	Detail     map[string]any `json:"detail,omitempty"`
+	OccurredAt string         `json:"occurred_at"`
+}
+
 // EngineAPIError is a business-level rejection from Approval-Engine-Service
 // itself (HTTP 4xx with a JSON error body) — as opposed to a network/timeout
 // failure. Declared in domain (not the client package) so request_service

@@ -48,6 +48,22 @@ func (f *fakeRequestRepository) GetByID(ctx context.Context, id string) (*domain
 	return nil, nil
 }
 
+func (f *fakeRequestRepository) GetByApprovalRequestID(ctx context.Context, approvalRequestID string) (*domain.AssetRequest, error) {
+	for i := range f.items {
+		if f.items[i].ApprovalRequestID != nil && *f.items[i].ApprovalRequestID == approvalRequestID {
+			item := f.items[i]
+			if f.steps != nil {
+				item.Chain = f.steps[item.ID]
+			}
+			if f.history != nil {
+				item.Hist = f.history[item.ID]
+			}
+			return &item, nil
+		}
+	}
+	return nil, nil
+}
+
 func (f *fakeRequestRepository) ResolveRequester(ctx context.Context, nameOrEmail string) (*domain.RequesterInfo, error) {
 	info, ok := f.requesters[nameOrEmail]
 	if !ok {
@@ -175,6 +191,10 @@ type fakeApprovalEngineClient struct {
 	decideErr    error
 	decideResult *domain.EngineApprovalRequest
 	decideCalls  []domain.EngineDecisionInput
+
+	getErr    error
+	getResult *domain.EngineApprovalRequest
+	getCalls  []string
 }
 
 func (f *fakeApprovalEngineClient) CreateRequest(ctx context.Context, in domain.EngineCreateRequestInput) (*domain.EngineApprovalRequest, error) {
@@ -200,6 +220,13 @@ func (f *fakeApprovalEngineClient) Decide(ctx context.Context, approvalRequestID
 }
 
 func (f *fakeApprovalEngineClient) GetRequest(ctx context.Context, approvalRequestID string) (*domain.EngineApprovalRequest, error) {
+	f.getCalls = append(f.getCalls, approvalRequestID)
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	if f.getResult != nil {
+		return f.getResult, nil
+	}
 	return nil, errors.New("not implemented in this fake")
 }
 
@@ -569,6 +596,80 @@ func TestRequestService_ApprovalAction(t *testing.T) {
 		_, err := svc.ApprovalAction(context.Background(), "REQ-MISSING", domain.ApprovalActionInput{Action: domain.ApprovalActionApprove})
 		if !errors.Is(err, ErrRequestNotFound) {
 			t.Fatalf("expected ErrRequestNotFound, got %v", err)
+		}
+	})
+}
+
+func TestRequestService_HandleEngineWebhook(t *testing.T) {
+	engineID := "eng-REQ-0001"
+
+	t.Run("refreshes and mirrors the local request found by approval_request_id", func(t *testing.T) {
+		repo := &fakeRequestRepository{items: []domain.AssetRequest{
+			{ID: "REQ-0001", Status: domain.RequestStatusWaitingApproval, ApprovalRequestID: &engineID},
+		}}
+		engine := &fakeApprovalEngineClient{getResult: &domain.EngineApprovalRequest{
+			ID: engineID, Status: "approved", CurrentStepOrder: 2,
+			Steps: []domain.EngineApprovalStep{{StepOrder: 1, Name: "Supervisor"}, {StepOrder: 2, Name: "Manager"}},
+		}}
+		svc := NewRequestService(repo, engine)
+
+		err := svc.HandleEngineWebhook(context.Background(), domain.EngineWebhookEvent{
+			Event: "request.approved", RequestID: engineID,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(engine.getCalls) != 1 || engine.getCalls[0] != engineID {
+			t.Fatalf("expected engine.GetRequest to be called with %s, got %v", engineID, engine.getCalls)
+		}
+		if len(repo.decisionResults) != 1 || repo.decisionResults[0].id != "REQ-0001" || repo.decisionResults[0].localStatus != domain.RequestStatusApproved {
+			t.Fatalf("expected REQ-0001 mirrored to APPROVED, got %+v", repo.decisionResults)
+		}
+	})
+
+	t.Run("unknown approval_request_id is ignored, not an error", func(t *testing.T) {
+		repo := &fakeRequestRepository{}
+		engine := &fakeApprovalEngineClient{}
+		svc := NewRequestService(repo, engine)
+
+		err := svc.HandleEngineWebhook(context.Background(), domain.EngineWebhookEvent{
+			Event: "request.approved", RequestID: "eng-does-not-exist",
+		})
+		if err != nil {
+			t.Fatalf("expected nil error for an unknown request id, got %v", err)
+		}
+		if len(engine.getCalls) != 0 {
+			t.Fatalf("expected GetRequest not to be called for an unknown request id")
+		}
+	})
+
+	t.Run("a request already in fulfillment is not regressed by a late webhook", func(t *testing.T) {
+		repo := &fakeRequestRepository{items: []domain.AssetRequest{
+			{ID: "REQ-0001", Status: domain.RequestStatusFulfillment, ApprovalRequestID: &engineID},
+		}}
+		engine := &fakeApprovalEngineClient{getResult: &domain.EngineApprovalRequest{ID: engineID, Status: "approved"}}
+		svc := NewRequestService(repo, engine)
+
+		err := svc.HandleEngineWebhook(context.Background(), domain.EngineWebhookEvent{
+			Event: "request.approved", RequestID: engineID,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(engine.getCalls) != 0 {
+			t.Fatalf("expected GetRequest not to be called once fulfillment has started")
+		}
+		if len(repo.decisionResults) != 0 {
+			t.Fatalf("expected no status mirroring once fulfillment has started")
+		}
+	})
+
+	t.Run("empty request_id is a no-op", func(t *testing.T) {
+		repo := &fakeRequestRepository{}
+		svc := NewRequestService(repo, &fakeApprovalEngineClient{})
+
+		if err := svc.HandleEngineWebhook(context.Background(), domain.EngineWebhookEvent{Event: "request.approved"}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 }

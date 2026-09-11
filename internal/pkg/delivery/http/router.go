@@ -27,15 +27,17 @@ type Handlers struct {
 	User    *handler.UserHandler
 	Request *handler.RequestHandler
 	Catalog *handler.CatalogHandler
+	Webhook *handler.WebhookHandler
 }
 
 // Dependencies contains infrastructure used by the HTTP application.
 type Dependencies struct {
-	Database            DatabasePinger
-	DatabasePingTimeout time.Duration
-	TokenManager        *jwt.TokenManager
-	AllowedOrigins      []string
-	Handlers            Handlers
+	Database             DatabasePinger
+	DatabasePingTimeout  time.Duration
+	TokenManager         *jwt.TokenManager
+	AllowedOrigins       []string
+	Handlers             Handlers
+	ApprovalEngineAPIKey string // secret used to verify inbound webhook signatures
 }
 
 // NewRouter builds the HTTP router for the service.
@@ -81,6 +83,14 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 	if deps.Handlers.Auth != nil {
 		authGroup := api.Group("/auth")
 		authGroup.Post("/login", deps.Handlers.Auth.Login)
+	}
+
+	// Public webhook routes — the caller is Approval-Engine-Service, not a
+	// logged-in user, so this is gated by signature verification instead of
+	// JWT (see middleware.VerifyWebhookSignature).
+	if deps.Handlers.Webhook != nil {
+		webhooks := api.Group("/webhooks", middleware.VerifyWebhookSignature(deps.ApprovalEngineAPIKey))
+		webhooks.Post("/approval-engine", deps.Handlers.Webhook.ApprovalEngine)
 	}
 
 	// Protected routes (require JWT)

@@ -60,15 +60,17 @@ func initialize() error {
 	requestService := service.NewRequestService(requestRepo, approvalEngineClient)
 
 	fiberApp := appHttp.NewRouter(appHttp.Dependencies{
-		Database:            db,
-		DatabasePingTimeout: applicationConfig.DatabasePingTimeout,
-		TokenManager:        tokenManager,
-		AllowedOrigins:      applicationConfig.AllowedOrigins,
+		Database:             db,
+		DatabasePingTimeout:  applicationConfig.DatabasePingTimeout,
+		TokenManager:         tokenManager,
+		AllowedOrigins:       applicationConfig.AllowedOrigins,
+		ApprovalEngineAPIKey: applicationConfig.ApprovalEngineAPIKey,
 		Handlers: appHttp.Handlers{
 			Auth:    authHandlerInstance,
 			User:    userHandlerInstance,
 			Request: appHandler.NewRequestHandler(requestService),
 			Catalog: appHandler.NewCatalogHandler(databaseConnection),
+			Webhook: appHandler.NewWebhookHandler(requestService),
 		},
 	})
 

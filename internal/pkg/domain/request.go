@@ -123,6 +123,11 @@ type ApprovalActionInput struct {
 type RequestRepository interface {
 	ListAll(ctx context.Context) ([]AssetRequest, error)
 	GetByID(ctx context.Context, id string) (*AssetRequest, error)
+	// GetByApprovalRequestID finds the local request whose approval_request_id
+	// matches the engine's own id — the only identifier a webhook from
+	// Approval-Engine-Service carries. Returns nil (no error) if no local
+	// request has synced to that engine id.
+	GetByApprovalRequestID(ctx context.Context, approvalRequestID string) (*AssetRequest, error)
 	// ResolveRequester finds a requester by name or email, used to attribute a
 	// new request to its requester and to build the Approval Engine payload.
 	// Returns nil if no match is found.
@@ -172,4 +177,11 @@ type RequestService interface {
 	// to be invoked periodically by an external scheduler (e.g. cron calling
 	// cmd/retrypendingsync) — not run automatically by the HTTP server.
 	RetryPendingApprovalSync(ctx context.Context) (retried, failed int, err error)
+	// HandleEngineWebhook processes a (signature-verified) notification from
+	// Approval-Engine-Service: it resolves the local request by the engine's
+	// RequestID and re-fetches/mirrors its current state. Unknown request ids
+	// (e.g. a webhook for another consuming app, or one that arrives before
+	// our own CreateRequest response is saved) are ignored, not errored —
+	// see Langkah 6 in Approval-Engine-Service's asset-system-integration-checklist.md.
+	HandleEngineWebhook(ctx context.Context, event EngineWebhookEvent) error
 }
