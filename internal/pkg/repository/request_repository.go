@@ -192,7 +192,7 @@ func (repo *requestRepository) GetByID(ctx context.Context, id string) (*domain.
 }
 
 func (repo *requestRepository) GetByApprovalRequestID(ctx context.Context, approvalRequestID string) (*domain.AssetRequest, error) {
-	row := repo.db.QueryRowContext(ctx, `SELECT`+requestSelectColumns+requestSelectFrom+`WHERE ar.approval_request_id = ?`, approvalRequestID)
+	row := repo.db.QueryRowContext(ctx, `SELECT`+requestSelectColumns+requestSelectFrom+`WHERE ar.approval_request_id = $1`, approvalRequestID)
 	item, err := scanAssetRequest(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
