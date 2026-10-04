@@ -11,8 +11,11 @@
 //
 //	go run ./cmd/syncparticipants
 //
-// Reads TURSO_DATABASE_URL/TURSO_AUTH_TOKEN and APPROVAL_ENGINE_BASE_URL/
-// APPROVAL_ENGINE_API_KEY from .env (or the process environment).
+// Reads TURSO_DATABASE_URL/TURSO_AUTH_TOKEN, APPROVAL_ENGINE_BASE_URL and
+// APPROVAL_ENGINE_ADMIN_KEY from .env (or the process environment). The
+// import is operator-only on the engine (the org chart is shared by every
+// app that uses it), so it takes the engine's admin key, not this app's
+// APPROVAL_ENGINE_API_KEY.
 package main
 
 import (
@@ -57,7 +60,7 @@ func run() error {
 	}
 
 	engineBaseURL := requireEnv("APPROVAL_ENGINE_BASE_URL")
-	engineAPIKey := requireEnv("APPROVAL_ENGINE_API_KEY")
+	engineAdminKey := requireEnv("APPROVAL_ENGINE_ADMIN_KEY")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -77,7 +80,7 @@ func run() error {
 		return nil
 	}
 
-	if err := importParticipants(ctx, engineBaseURL, engineAPIKey, participants); err != nil {
+	if err := importParticipants(ctx, engineBaseURL, engineAdminKey, participants); err != nil {
 		return fmt.Errorf("import participants: %w", err)
 	}
 
@@ -136,7 +139,7 @@ func loadParticipants(ctx context.Context, db *sql.DB) ([]participant, error) {
 	return out, rows.Err()
 }
 
-func importParticipants(ctx context.Context, baseURL, apiKey string, participants []participant) error {
+func importParticipants(ctx context.Context, baseURL, adminKey string, participants []participant) error {
 	body, err := json.Marshal(struct {
 		Participants []participant `json:"participants"`
 	}{Participants: participants})
@@ -149,11 +152,7 @@ func importParticipants(ctx context.Context, baseURL, apiKey string, participant
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// Note: /participants/import is not behind X-API-Key in the engine's
-	// current router (see Approval-Engine-Service/internal/router/router.go)
-	// — only POST /requests is. Sent anyway so this keeps working once that
-	// gap is closed.
-	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("X-Admin-Key", adminKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

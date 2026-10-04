@@ -134,3 +134,41 @@ func TestClient_RequestTimesOut(t *testing.T) {
 
 // Compile-time check that *Client satisfies domain.ApprovalEngineClient.
 var _ domain.ApprovalEngineClient = (*Client)(nil)
+
+func TestClient_DecideAndGetRequest_SendAPIKey(t *testing.T) {
+	// The engine requires X-API-Key on every /requests route, so a missing
+	// key here would turn every decision and status refresh into a 401.
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path+" key="+r.Header.Get("X-API-Key"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"data":    map[string]any{"id": "eng-req-1", "status": "pending"},
+		})
+	}))
+	defer server.Close()
+
+	client := New(server.URL, "test-key", nil)
+	if _, err := client.Decide(context.Background(), "eng-req-1", domain.EngineDecisionInput{
+		UserID: "EMP102", Decision: domain.EngineDecisionApproved,
+	}); err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	if _, err := client.GetRequest(context.Background(), "eng-req-1"); err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+
+	want := []string{
+		"POST /api/v1/requests/eng-req-1/decision key=test-key",
+		"GET /api/v1/requests/eng-req-1 key=test-key",
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("expected %d calls, got %v", len(want), seen)
+	}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Fatalf("call %d: expected %q, got %q", i, want[i], seen[i])
+		}
+	}
+}

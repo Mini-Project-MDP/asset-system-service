@@ -21,7 +21,11 @@ import (
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/domain"
 )
 
-const defaultTimeout = 5 * time.Second
+// defaultTimeout must cover the engine's slowest call, not its typical one: a
+// decision is several sequential round trips to the engine's remote Turso DB
+// and was measured at 3-4s, occasionally past 5s. A tighter timeout makes us
+// report failure for a decision the engine actually committed.
+const defaultTimeout = 15 * time.Second
 
 // Client calls Approval-Engine-Service over HTTP.
 type Client struct {
@@ -50,7 +54,7 @@ func (c *Client) CreateRequest(ctx context.Context, in domain.EngineCreateReques
 	}{in.DocType, in.ResourceID, in.RequesterID, in.Payload}
 
 	var out domain.EngineApprovalRequest
-	if err := c.do(ctx, http.MethodPost, "/api/v1/requests", body, true, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/api/v1/requests", body, &out); err != nil {
 		return nil, fmt.Errorf("approvalengine: create request: %w", err)
 	}
 	return &out, nil
@@ -68,7 +72,7 @@ func (c *Client) Decide(ctx context.Context, approvalRequestID string, in domain
 
 	var out domain.EngineApprovalRequest
 	path := "/api/v1/requests/" + approvalRequestID + "/decision"
-	if err := c.do(ctx, http.MethodPost, path, body, false, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
 		return nil, fmt.Errorf("approvalengine: decide %s: %w", approvalRequestID, err)
 	}
 	return &out, nil
@@ -78,7 +82,7 @@ func (c *Client) Decide(ctx context.Context, approvalRequestID string, in domain
 func (c *Client) GetRequest(ctx context.Context, approvalRequestID string) (*domain.EngineApprovalRequest, error) {
 	var out domain.EngineApprovalRequest
 	path := "/api/v1/requests/" + approvalRequestID
-	if err := c.do(ctx, http.MethodGet, path, nil, false, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, fmt.Errorf("approvalengine: get request %s: %w", approvalRequestID, err)
 	}
 	return &out, nil
@@ -92,11 +96,11 @@ type envelope struct {
 	Error   string          `json:"error,omitempty"`
 }
 
-// do sends one request and decodes its envelope into out (if non-nil).
-// withAPIKey should be true only for the one endpoint that requires it
-// (see Approval-Engine-Service's router.go: only POST /requests is gated by
-// X-API-Key).
-func (c *Client) do(ctx context.Context, method, path string, body any, withAPIKey bool, out any) error {
+// do sends one request and decodes its envelope into out (if non-nil). Every
+// /requests route on the engine requires X-API-Key and only reaches this
+// application's own requests (see Approval-Engine-Service's router.go), so
+// the key goes on every call.
+func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
 	var reqBody io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -113,9 +117,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, withAPIK
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if withAPIKey {
-		req.Header.Set("X-API-Key", c.apiKey)
-	}
+	req.Header.Set("X-API-Key", c.apiKey)
 
 	resp, err := c.http.Do(req)
 	if err != nil {

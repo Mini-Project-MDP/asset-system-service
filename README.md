@@ -66,6 +66,9 @@ Sejak integrasi dengan `Approval-Engine-Service` (lihat
   ada yang gagal, supaya wrapper cron bisa alert.
 - Jalankan `go run ./cmd/syncparticipants` setelah ada perubahan data user/organisasi, supaya
   Approval Engine tahu struktur atasan-bawahan terbaru untuk resolusi approver.
+  Perintah ini butuh `APPROVAL_ENGINE_ADMIN_KEY` (admin key milik engine, bukan
+  `APPROVAL_ENGINE_API_KEY`): struktur organisasi dipakai bersama semua aplikasi, jadi engine
+  hanya menerima impornya dari operator.
 
 **Rotasi `APPROVAL_ENGINE_API_KEY`:** `api_key` hanya ditampilkan sekali saat
 `POST /api/v1/applications` dipanggil di `Approval-Engine-Service` — tidak bisa diambil ulang.
