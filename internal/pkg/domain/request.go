@@ -133,8 +133,16 @@ type RequestRepository interface {
 	// Returns nil if no match is found.
 	ResolveRequester(ctx context.Context, nameOrEmail string) (*RequesterInfo, error)
 	Create(ctx context.Context, requesterID string, input CreateRequestInput) (id string, err error)
-	SaveFulfillmentData(ctx context.Context, id, fulfillData string) error
-	AdvanceFulfillment(ctx context.Context, id string) error
+	// SaveFulfillmentData stores the (already validated, normalized JSON)
+	// asset data and moves the request from Processing to Shipped. It only
+	// applies to a request that is ready for processing (approved, or in
+	// fulfillment at step 0); ok is false when it was not, so a double click
+	// or a concurrent caller can never skip a stage.
+	SaveFulfillmentData(ctx context.Context, id, fulfillData string) (ok bool, err error)
+	// AdvanceFulfillment moves a request from Shipped to Delivered, and from
+	// Delivered to Completed. ok is false when the request is not in one of
+	// those two stages; newStep is the stage it reached (3 = completed).
+	AdvanceFulfillment(ctx context.Context, id string) (newStep int, ok bool, err error)
 	// SetApprovalEngineRef persists a successful Approval Engine sync at
 	// creation time: engine's own request id, its current status, and its
 	// active step name.
@@ -170,8 +178,13 @@ type RequestService interface {
 	Detail(ctx context.Context, id string) (*AssetRequest, error)
 	Create(ctx context.Context, input CreateRequestInput) (*AssetRequest, error)
 	ApprovalAction(ctx context.Context, id string, input ApprovalActionInput) (*AssetRequest, error)
-	SaveFulfillmentData(ctx context.Context, id, fulfillData string) (*AssetRequest, error)
-	AdvanceFulfillment(ctx context.Context, id string) (*AssetRequest, error)
+	// SaveFulfillmentData validates fulfillData (JSON) for the request's
+	// category, stores it and moves the request to Shipped. actor is the
+	// acting user's employee_no, recorded in the request history.
+	SaveFulfillmentData(ctx context.Context, id, fulfillData, actor string) (*AssetRequest, error)
+	// AdvanceFulfillment moves the request to its next stage (Delivered, then
+	// Completed). actor is recorded in the request history.
+	AdvanceFulfillment(ctx context.Context, id, actor string) (*AssetRequest, error)
 	// RetryPendingApprovalSync re-attempts Approval Engine registration for
 	// every request stuck at ApprovalSyncPending (see Milestone 5/7). Meant
 	// to be invoked periodically by an external scheduler (e.g. cron calling

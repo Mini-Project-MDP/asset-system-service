@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -293,22 +294,43 @@ func (repo *requestRepository) ListPendingApprovalSync(ctx context.Context) ([]d
 
 func (repo *requestRepository) SetApprovalDecisionResult(ctx context.Context, id, localStatus, engineStatus string, currentStepOrder int, currentStepName *string) error {
 	if _, err := repo.db.ExecContext(ctx,
-		`UPDATE asset_requests SET status = $1, current_step = $2, approval_status = $3, current_step_name = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5`,
-		localStatus, currentStepOrder, engineStatus, currentStepName, id,
+		// An approved request is ready for the Asset Team: starting its
+		// fulfillment step at 0 (Processing) is what puts it in their queue.
+		// The status is passed twice ($1 to store, $6 to compare) because one
+		// parameter cannot be both a varchar column value and a text comparison.
+		`UPDATE asset_requests SET status = $1, current_step = $2, approval_status = $3, current_step_name = $4,
+			fulfillment_step = CASE WHEN $6::text = 'APPROVED' THEN COALESCE(fulfillment_step, 0) ELSE fulfillment_step END,
+			updated_at = CURRENT_TIMESTAMP WHERE id = $5`,
+		localStatus, currentStepOrder, engineStatus, currentStepName, id, localStatus,
 	); err != nil {
 		return fmt.Errorf("set approval decision result for %s: %w", id, err)
 	}
 	return nil
 }
 
-func (repo *requestRepository) SaveFulfillmentData(ctx context.Context, id, fulfillData string) error {
-	if _, err := repo.db.ExecContext(ctx,
-		`UPDATE asset_requests SET fulfillment_data = $1, fulfillment_step = 1, status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
-		fulfillData, domain.RequestStatusFulfillment, id,
-	); err != nil {
-		return fmt.Errorf("save fulfillment data for %s: %w", id, err)
+// saveFulfillmentDataSQL records the asset data and moves Processing to
+// Shipped. The WHERE clause is the state guard: only an approved request that
+// has not been picked up yet, or one in fulfillment at step 0, matches. Status
+// values are trusted constants, inlined to keep the statement free of
+// parameter-type inference.
+var saveFulfillmentDataSQL = fmt.Sprintf(`
+	UPDATE asset_requests
+	SET fulfillment_data = $1, fulfillment_step = 1, status = '%[1]s', updated_at = CURRENT_TIMESTAMP
+	WHERE id = $2 AND (
+		(status = '%[2]s' AND COALESCE(fulfillment_step, 0) = 0)
+		OR (status = '%[1]s' AND fulfillment_step = 0)
+	)`, domain.RequestStatusFulfillment, domain.RequestStatusApproved)
+
+func (repo *requestRepository) SaveFulfillmentData(ctx context.Context, id, fulfillData string) (bool, error) {
+	res, err := repo.db.ExecContext(ctx, saveFulfillmentDataSQL, fulfillData, id)
+	if err != nil {
+		return false, fmt.Errorf("save fulfillment data for %s: %w", id, err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("save fulfillment data for %s: %w", id, err)
+	}
+	return n > 0, nil
 }
 
 func (repo *requestRepository) SetApprovalEngineRef(ctx context.Context, id, approvalRequestID, approvalStatus string, currentStepName *string) error {
@@ -331,17 +353,29 @@ func (repo *requestRepository) SetApprovalSyncPending(ctx context.Context, id st
 	return nil
 }
 
-func (repo *requestRepository) AdvanceFulfillment(ctx context.Context, id string) error {
-	if _, err := repo.db.ExecContext(ctx, `
-		UPDATE asset_requests
-		SET fulfillment_step = COALESCE(fulfillment_step, 0) + 1,
-			status = CASE WHEN COALESCE(fulfillment_step, 0) + 1 >= 4 THEN $1 ELSE $2 END,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = $3
-	`, domain.RequestStatusCompleted, domain.RequestStatusFulfillment, id); err != nil {
-		return fmt.Errorf("advance fulfillment for %s: %w", id, err)
+// advanceFulfillmentSQL moves Shipped (1) to Delivered (2) and Delivered to
+// Completed (3). Stages are Processing=0, Shipped=1, Delivered=2, and step 3
+// means the request is complete. Only a request in fulfillment at step 1 or 2
+// matches, so a request that is unapproved, not yet shipped, or already
+// completed is left alone.
+var advanceFulfillmentSQL = fmt.Sprintf(`
+	UPDATE asset_requests
+	SET fulfillment_step = fulfillment_step + 1,
+		status = CASE WHEN fulfillment_step + 1 >= 3 THEN '%[1]s' ELSE '%[2]s' END,
+		updated_at = CURRENT_TIMESTAMP
+	WHERE id = $1 AND status = '%[2]s' AND fulfillment_step IN (1, 2)
+	RETURNING fulfillment_step`, domain.RequestStatusCompleted, domain.RequestStatusFulfillment)
+
+func (repo *requestRepository) AdvanceFulfillment(ctx context.Context, id string) (int, bool, error) {
+	var newStep int
+	err := repo.db.QueryRowContext(ctx, advanceFulfillmentSQL, id).Scan(&newStep)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
 	}
-	return nil
+	if err != nil {
+		return 0, false, fmt.Errorf("advance fulfillment for %s: %w", id, err)
+	}
+	return newStep, true, nil
 }
 
 func (repo *requestRepository) SaveApprovalSteps(ctx context.Context, requestID string, steps []domain.ApprovalStepItem) error {

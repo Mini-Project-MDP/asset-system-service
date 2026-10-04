@@ -427,16 +427,85 @@ func localStatusForEngineStatus(engineStatus string) string {
 	}
 }
 
-func (s *requestService) SaveFulfillmentData(ctx context.Context, id, fulfillData string) (*domain.AssetRequest, error) {
-	if err := s.repo.SaveFulfillmentData(ctx, id, fulfillData); err != nil {
+// readyForFulfillmentData reports whether a request is waiting for its asset
+// data: approved (not yet picked up), or in fulfillment at Processing (step 0).
+func readyForFulfillmentData(r *domain.AssetRequest) bool {
+	atProcessing := r.FulfillmentStep == nil || *r.FulfillmentStep == 0
+	switch r.Status {
+	case domain.RequestStatusApproved:
+		return atProcessing
+	case domain.RequestStatusFulfillment:
+		return r.FulfillmentStep != nil && *r.FulfillmentStep == 0
+	}
+	return false
+}
+
+// recordFulfillmentEvent appends a fulfillment transition to the request
+// history. The history is an audit aid: a failure to write it is logged but
+// never undoes a transition that already happened.
+func (s *requestService) recordFulfillmentEvent(ctx context.Context, id, actor, action string) {
+	err := s.repo.AddHistory(ctx, id, domain.ApprovalHistoryItem{
+		Role:   actor,
+		Action: action,
+		Date:   time.Now().Format("02 Jan 2006"),
+		Type:   "go",
+	})
+	if err != nil {
+		log.Printf("request %s: record fulfillment event %q failed: %v", id, action, err)
+	}
+}
+
+func (s *requestService) SaveFulfillmentData(ctx context.Context, id, fulfillData, actor string) (*domain.AssetRequest, error) {
+	// GetByID (not Detail): the guard needs only local state, not an engine round trip.
+	item, err := s.repo.GetByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
+	if item == nil {
+		return nil, ErrRequestNotFound
+	}
+	if !readyForFulfillmentData(item) {
+		return nil, ErrFulfillmentNotReady
+	}
+
+	normalized, err := validateFulfillmentData(item.Category, item.Quantity, fulfillData)
+	if err != nil {
+		return nil, err
+	}
+
+	// The repository re-checks the state atomically, so two concurrent saves
+	// cannot both succeed.
+	ok, err := s.repo.SaveFulfillmentData(ctx, id, normalized)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrFulfillmentNotReady
+	}
+	s.recordFulfillmentEvent(ctx, id, actor, "Data aset dicatat — Shipped")
 	return s.Detail(ctx, id)
 }
 
-func (s *requestService) AdvanceFulfillment(ctx context.Context, id string) (*domain.AssetRequest, error) {
-	if err := s.repo.AdvanceFulfillment(ctx, id); err != nil {
+func (s *requestService) AdvanceFulfillment(ctx context.Context, id, actor string) (*domain.AssetRequest, error) {
+	item, err := s.repo.GetByID(ctx, id)
+	if err != nil {
 		return nil, err
+	}
+	if item == nil {
+		return nil, ErrRequestNotFound
+	}
+
+	newStep, ok, err := s.repo.AdvanceFulfillment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrFulfillmentNotReady
+	}
+	if newStep >= 3 {
+		s.recordFulfillmentEvent(ctx, id, actor, "Fulfillment selesai — Completed")
+	} else {
+		s.recordFulfillmentEvent(ctx, id, actor, "Barang diterima — Delivered")
 	}
 	return s.Detail(ctx, id)
 }

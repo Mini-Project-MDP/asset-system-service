@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/domain"
@@ -57,6 +58,21 @@ func mapRequestList(items []domain.AssetRequest) []fiber.Map {
 	return mapped
 }
 
+// parseFulfillmentData returns the stored asset data as a JSON object. Data
+// that is not valid JSON (rows written before the data was stored as JSON used
+// Go's value formatting, e.g. "map[codes:[A B]]") cannot be recovered, so it
+// is reported as absent instead of being passed on as an unusable string.
+func parseFulfillmentData(stored *string) any {
+	if stored == nil || *stored == "" {
+		return nil
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(*stored), &parsed); err != nil {
+		return nil
+	}
+	return parsed
+}
+
 // mapRequest builds the JSON shape the frontend expects for an asset request.
 func mapRequest(r domain.AssetRequest) fiber.Map {
 	var fulfillStep interface{}
@@ -91,7 +107,7 @@ func mapRequest(r domain.AssetRequest) fiber.Map {
 		"hist":            hist,
 		"statusTag":       computeStatusTag(r),
 		"fulfillStep":     fulfillStep,
-		"fulfillData":     r.FulfillmentData,
+		"fulfillData":     parseFulfillmentData(r.FulfillmentData),
 		"revisedFromId":   r.RevisedFromID,
 		"approvalStatus":  r.ApprovalStatus,
 		"currentStepName": r.CurrentStepName,

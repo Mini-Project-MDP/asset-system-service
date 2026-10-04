@@ -1,8 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/delivery/http/middleware"
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/domain"
@@ -196,7 +196,8 @@ func (h *RequestHandler) Fulfillment(c fiber.Ctx) error { return h.List(c) }
 func (h *RequestHandler) FulfillmentDetail(c fiber.Ctx) error { return h.Detail(c) }
 
 // SaveFulfillmentData handles POST /api/v1/fulfillment/{id}/data.
-// @Summary Save fulfillment data
+// @Summary Save fulfillment data and move to Shipped
+// @Description Records the asset data for the request's category (Barcode: codes, Android: units, Server: specs), validated against the request quantity, and moves a ready request from Processing to Shipped. 409 when the request is not approved yet or already past Processing.
 // @Tags Requests
 // @Accept json
 // @Produce json
@@ -205,16 +206,26 @@ func (h *RequestHandler) FulfillmentDetail(c fiber.Ctx) error { return h.Detail(
 // @Success 200 {object} response.Response
 // @Failure 400 {object} response.Response
 // @Failure 401 {object} response.Response
+// @Failure 404 {object} response.Response
+// @Failure 409 {object} response.Response
 // @Router /api/v1/fulfillment/{id}/data [post]
 func (h *RequestHandler) SaveFulfillmentData(c fiber.Ctx) error {
 	var body struct {
-		FulfillData interface{} `json:"fulfillData"`
+		FulfillData json.RawMessage `json:"fulfillData"`
 	}
 	if err := c.Bind().Body(&body); err != nil {
 		return response.Error(c, fiber.StatusBadRequest, "Invalid fulfillment payload")
 	}
+	if len(body.FulfillData) == 0 || string(body.FulfillData) == "null" {
+		return response.Error(c, fiber.StatusBadRequest, "fulfillData is required")
+	}
 
-	item, err := h.service.SaveFulfillmentData(c.Context(), c.Params("id"), fmt.Sprint(body.FulfillData))
+	claims, ok := c.Locals(middleware.UserContextKey).(*jwt.UserClaims)
+	if !ok || claims == nil {
+		return response.Error(c, fiber.StatusUnauthorized, "Unauthorized context")
+	}
+
+	item, err := h.service.SaveFulfillmentData(c.Context(), c.Params("id"), string(body.FulfillData), claims.EmployeeNo)
 	if err != nil {
 		return requestErrorResponse(c, err)
 	}
@@ -223,15 +234,23 @@ func (h *RequestHandler) SaveFulfillmentData(c fiber.Ctx) error {
 
 // AdvanceFulfillment handles POST /api/v1/fulfillment/{id}/advance.
 // @Summary Advance fulfillment to the next stage
+// @Description Shipped to Delivered, then Delivered to Completed. 409 when the request is not in one of those two stages (for example the data was never recorded, or it is already completed).
 // @Tags Requests
 // @Produce json
 // @Security BearerAuth
 // @Param id path string true "Request ID"
 // @Success 200 {object} response.Response
 // @Failure 401 {object} response.Response
+// @Failure 404 {object} response.Response
+// @Failure 409 {object} response.Response
 // @Router /api/v1/fulfillment/{id}/advance [post]
 func (h *RequestHandler) AdvanceFulfillment(c fiber.Ctx) error {
-	item, err := h.service.AdvanceFulfillment(c.Context(), c.Params("id"))
+	claims, ok := c.Locals(middleware.UserContextKey).(*jwt.UserClaims)
+	if !ok || claims == nil {
+		return response.Error(c, fiber.StatusUnauthorized, "Unauthorized context")
+	}
+
+	item, err := h.service.AdvanceFulfillment(c.Context(), c.Params("id"), claims.EmployeeNo)
 	if err != nil {
 		return requestErrorResponse(c, err)
 	}
@@ -253,6 +272,10 @@ func requestErrorResponse(c fiber.Ctx, err error) error {
 		return response.Error(c, fiber.StatusBadRequest, "Unsupported approval action")
 	case errors.Is(err, service.ErrRevisionCommentRequired):
 		return response.Error(c, fiber.StatusBadRequest, "Comment is required when requesting revision")
+	case errors.Is(err, service.ErrFulfillmentDataInvalid):
+		return response.Error(c, fiber.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrFulfillmentNotReady):
+		return response.Error(c, fiber.StatusConflict, "Request is not ready for this fulfillment step")
 	case errors.Is(err, service.ErrApprovalNotSynced):
 		return response.Error(c, fiber.StatusConflict, "Request has not synced with the approval engine yet, try again shortly")
 	case errors.As(err, &engineErr):

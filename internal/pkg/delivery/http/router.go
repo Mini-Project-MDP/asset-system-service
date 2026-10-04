@@ -29,6 +29,7 @@ type Handlers struct {
 	Catalog      *handler.CatalogHandler
 	MasterData   *handler.MasterDataHandler
 	PhoneCatalog *handler.PhoneCatalogHandler
+	Imei         *handler.ImeiHandler
 	Webhook      *handler.WebhookHandler
 }
 
@@ -106,6 +107,9 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 			catalog.Put("/phone-brands/:id", deps.Handlers.PhoneCatalog.UpdateBrand)
 			catalog.Post("/phone-models", deps.Handlers.PhoneCatalog.CreateModel)
 			catalog.Put("/phone-models/:id", deps.Handlers.PhoneCatalog.UpdateModel)
+		}
+		if deps.Handlers.Imei != nil {
+			protected.Get("/fulfillment/imei-lookup/:imei", middleware.RequirePermission("fulfillment:read"), deps.Handlers.Imei.Lookup)
 		}
 		if deps.Handlers.Request != nil {
 			requests := protected.Group("/requests", middleware.RequirePermission("request:read"))

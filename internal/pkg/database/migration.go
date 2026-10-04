@@ -184,6 +184,14 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_phone_models_brand_name ON phone_models (brand_id, LOWER(name));
 
+	CREATE TABLE IF NOT EXISTS imei_reference (
+		tac VARCHAR(8) PRIMARY KEY,
+		brand VARCHAR(100) NOT NULL,
+		model VARCHAR(100) NOT NULL,
+		release_year VARCHAR(4) NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE TABLE IF NOT EXISTS asset_requests (
 		id VARCHAR(36) PRIMARY KEY,
 		requester_id VARCHAR(36) NOT NULL,

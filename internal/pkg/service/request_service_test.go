@@ -108,12 +108,48 @@ func (f *fakeRequestRepository) SetApprovalDecisionResult(ctx context.Context, i
 	return nil
 }
 
-func (f *fakeRequestRepository) SaveFulfillmentData(ctx context.Context, id, fulfillData string) error {
-	return nil
+// SaveFulfillmentData mirrors the real repository's guarded UPDATE: it only
+// applies to an approved request, or one in fulfillment at step 0.
+func (f *fakeRequestRepository) SaveFulfillmentData(ctx context.Context, id, fulfillData string) (bool, error) {
+	for i := range f.items {
+		it := &f.items[i]
+		if it.ID != id {
+			continue
+		}
+		atStepZero := it.FulfillmentStep == nil || *it.FulfillmentStep == 0
+		ready := (it.Status == domain.RequestStatusApproved && atStepZero) ||
+			(it.Status == domain.RequestStatusFulfillment && it.FulfillmentStep != nil && *it.FulfillmentStep == 0)
+		if !ready {
+			return false, nil
+		}
+		step := 1
+		it.FulfillmentStep = &step
+		it.Status = domain.RequestStatusFulfillment
+		it.FulfillmentData = &fulfillData
+		return true, nil
+	}
+	return false, nil
 }
 
-func (f *fakeRequestRepository) AdvanceFulfillment(ctx context.Context, id string) error {
-	return nil
+// AdvanceFulfillment mirrors the real repository: only Shipped (1) and
+// Delivered (2) can advance; reaching 3 completes the request.
+func (f *fakeRequestRepository) AdvanceFulfillment(ctx context.Context, id string) (int, bool, error) {
+	for i := range f.items {
+		it := &f.items[i]
+		if it.ID != id {
+			continue
+		}
+		if it.Status != domain.RequestStatusFulfillment || it.FulfillmentStep == nil || (*it.FulfillmentStep != 1 && *it.FulfillmentStep != 2) {
+			return 0, false, nil
+		}
+		step := *it.FulfillmentStep + 1
+		it.FulfillmentStep = &step
+		if step >= 3 {
+			it.Status = domain.RequestStatusCompleted
+		}
+		return step, true, nil
+	}
+	return 0, false, nil
 }
 
 func (f *fakeRequestRepository) SetApprovalEngineRef(ctx context.Context, id, approvalRequestID, approvalStatus string, currentStepName *string) error {

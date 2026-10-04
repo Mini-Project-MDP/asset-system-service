@@ -1,0 +1,25 @@
+tac,brand,model,release_year
+99000001,Samsung,Galaxy Tab,2019
+99000002,Samsung,Galaxy Tab,2021
+99000003,Samsung,Galaxy Tab,2023
+99000004,Samsung,Galaxy Tab,2024
+99000005,Samsung,A-series,2020
+99000006,Samsung,A-series,2021
+99000007,Samsung,A-series,2022
+99000008,Samsung,A-series,2023
+99000009,Samsung,A-series,2025
+99000010,Xiaomi,Redmi Note,2019
+99000011,Xiaomi,Redmi Note,2021
+99000012,Xiaomi,Redmi Note,2022
+99000013,Xiaomi,Redmi Note,2023
+99000014,Xiaomi,Redmi Note,2024
+99000015,Oppo,A-series,2020
+99000016,Oppo,A-series,2022
+99000017,Oppo,A-series,2023
+99000018,Oppo,A-series,2024
+99000019,Vivo,Standard,2021
+99000020,Vivo,Standard,2023
+99000021,Vivo,Standard,2024
+99000022,Realme,Standard,2022
+99000023,Realme,Standard,2023
+99000024,Realme,Standard,2025

@@ -60,6 +60,7 @@ func initialize() error {
 	requestService := service.NewRequestService(requestRepo, approvalEngineClient)
 	masterDataService := service.NewMasterDataService(repository.NewMasterDataRepository(databaseConnection))
 	phoneCatalogService := service.NewPhoneCatalogService(repository.NewPhoneCatalogRepository(databaseConnection))
+	imeiService := service.NewImeiService(repository.NewImeiReferenceRepository(databaseConnection))
 
 	fiberApp := appHttp.NewRouter(appHttp.Dependencies{
 		Database:             db,
@@ -74,6 +75,7 @@ func initialize() error {
 			Catalog:      appHandler.NewCatalogHandler(databaseConnection),
 			MasterData:   appHandler.NewMasterDataHandler(masterDataService),
 			PhoneCatalog: appHandler.NewPhoneCatalogHandler(phoneCatalogService),
+			Imei:         appHandler.NewImeiHandler(imeiService),
 			Webhook:      appHandler.NewWebhookHandler(requestService),
 		},
 	})

@@ -130,6 +130,14 @@ CREATE TABLE IF NOT EXISTS phone_models (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_phone_models_brand_name ON phone_models (brand_id, LOWER(name));
 
+CREATE TABLE IF NOT EXISTS imei_reference (
+    tac VARCHAR(8) PRIMARY KEY,
+    brand VARCHAR(100) NOT NULL,
+    model VARCHAR(100) NOT NULL,
+    release_year VARCHAR(4) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS asset_types (
     id VARCHAR(36) PRIMARY KEY,
     code VARCHAR(50) NOT NULL UNIQUE,
