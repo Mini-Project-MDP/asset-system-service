@@ -75,7 +75,7 @@ func initialize() error {
 		Handlers: appHttp.Handlers{
 			Auth:         authHandlerInstance,
 			User:         userHandlerInstance,
-			Request:      appHandler.NewRequestHandler(requestService),
+			Request:      appHandler.NewRequestHandler(requestService, permissionResolver),
 			Dashboard:    appHandler.NewDashboardHandler(dashboardService),
 			MasterData:   appHandler.NewMasterDataHandler(masterDataService),
 			PhoneCatalog: appHandler.NewPhoneCatalogHandler(phoneCatalogService),

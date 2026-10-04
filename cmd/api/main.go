@@ -89,7 +89,7 @@ func run() error {
 		Handlers: http.Handlers{
 			Auth:         authHandler,
 			User:         userHandler,
-			Request:      handler.NewRequestHandler(requestService),
+			Request:      handler.NewRequestHandler(requestService, permissionResolver),
 			Dashboard:    handler.NewDashboardHandler(dashboardService),
 			MasterData:   handler.NewMasterDataHandler(masterDataService),
 			PhoneCatalog: handler.NewPhoneCatalogHandler(phoneCatalogService),

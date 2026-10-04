@@ -67,9 +67,34 @@ type AssetRequest struct {
 	CurrentStepName   *string // mirrors the engine's active step name
 	RevisedFromID     *string // set when this request is a resubmission after a "revision" decision
 
+	// RequesterID is the user the request is attributed to; CreatedBy is the
+	// user who actually submitted it (empty for requests made before that was
+	// recorded). A user may see a request they submitted or are the requester of.
+	RequesterID string
+	CreatedBy   string
+
 	Chain []ApprovalStepItem
 	Hist  []ApprovalHistoryItem
 }
+
+// Viewer is who is asking for requests, for visibility decisions.
+type Viewer struct {
+	// UserID is the caller's id in this system's users table; empty when the
+	// token matches no active user.
+	UserID string
+	// CanReadAll: may see every request (Admin and Asset Team); everyone else
+	// sees only the requests they submitted or are the requester of.
+	CanReadAll bool
+}
+
+// Request status filters accepted by RequestFilter.Status, as the UI labels them.
+const (
+	RequestStatusFilterWaiting    = "Waiting"
+	RequestStatusFilterInProgress = "In progress"
+	RequestStatusFilterCompleted  = "Completed"
+	RequestStatusFilterRejected   = "Rejected"
+	RequestStatusFilterRevision   = "Revision"
+)
 
 // RequesterInfo is what request_service needs about a requester beyond their
 // internal id: the identifier shared with Approval-Engine-Service
@@ -87,6 +112,21 @@ type RequesterInfo struct {
 type RequestFilter struct {
 	Query string // matched against id, outlet, requester name (case-insensitive substring)
 	Type  string // asset category; "" or "All types" means no filter
+	// Status is a UI status filter (see the RequestStatusFilter* constants);
+	// "" or "All status" means no filter.
+	Status string
+	// VisibleToUser, when set, restricts the result to requests this user
+	// submitted or is the requester of.
+	VisibleToUser string
+}
+
+// RequestListQuery is RequestFilter after validation, in the form the
+// repository applies: statuses are stored status values.
+type RequestListQuery struct {
+	Search        string
+	Type          string
+	Statuses      []string
+	VisibleToUser string
 }
 
 // CreateRequestInput is the payload for creating a new asset request.
@@ -105,6 +145,8 @@ type CreateRequestInput struct {
 	// revision = rejected + brand new request, not an in-place edit). Nil for
 	// an ordinary first-time submission.
 	RevisedFromID *string
+	// CreatedBy is the id of the user submitting the request (empty if unknown).
+	CreatedBy string
 }
 
 // ApprovalActionInput is the payload for acting on a pending approval.
@@ -121,7 +163,9 @@ type ApprovalActionInput struct {
 
 // RequestRepository defines data access methods for asset requests.
 type RequestRepository interface {
-	ListAll(ctx context.Context) ([]AssetRequest, error)
+	// List returns the requests matching query, newest first, with their
+	// approval chain and history.
+	List(ctx context.Context, query RequestListQuery) ([]AssetRequest, error)
 	GetByID(ctx context.Context, id string) (*AssetRequest, error)
 	// GetByApprovalRequestID finds the local request whose approval_request_id
 	// matches the engine's own id — the only identifier a webhook from
@@ -176,6 +220,9 @@ type RequestRepository interface {
 type RequestService interface {
 	List(ctx context.Context, filter RequestFilter) ([]AssetRequest, error)
 	Detail(ctx context.Context, id string) (*AssetRequest, error)
+	// DetailFor is Detail limited to what the viewer may see: a request that
+	// is not theirs is reported as not found, so its existence is not revealed.
+	DetailFor(ctx context.Context, id string, viewer Viewer) (*AssetRequest, error)
 	Create(ctx context.Context, input CreateRequestInput) (*AssetRequest, error)
 	ApprovalAction(ctx context.Context, id string, input ApprovalActionInput) (*AssetRequest, error)
 	// SaveFulfillmentData validates fulfillData (JSON) for the request's

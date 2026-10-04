@@ -45,11 +45,16 @@ func newPermissionRepo() *fakePermissionRepo {
 	return &fakePermissionRepo{
 		users: map[string]*domain.User{
 			"usr_mgr1": manager, "manager1@mayora.com": manager, "EMP003": manager,
-			"usr_off": {ID: "usr_off", Email: "off@mayora.com", Status: "INACTIVE"},
+			"usr_off":        {ID: "usr_off", Email: "off@mayora.com", Status: "INACTIVE"},
+			"usr_all":        {ID: "usr_all", Email: "all@mayora.com", Status: "ACTIVE"},
+			"all@mayora.com": {ID: "usr_all", Email: "all@mayora.com", Status: "ACTIVE"},
+			"usr_own":        {ID: "usr_own", Email: "own@mayora.com", Status: "ACTIVE"},
 		},
 		permissions: map[string][]string{
 			"usr_mgr1": {"request:read", "fulfillment:read", "dashboard:read"},
-			"usr_off":  {"request:read"},
+			"usr_off":  {"request:read", "request:read_all"},
+			"usr_all":  {"request:read", "request:read_all"},
+			"usr_own":  {"request:read"},
 		},
 	}
 }
@@ -171,6 +176,72 @@ func TestPermissionResolverCaching(t *testing.T) {
 		b, _ := resolver.PermissionsFor(ctx, &jwt.UserClaims{UserID: "usr_off"})
 		if len(a) != 3 || len(b) != 0 {
 			t.Fatalf("a = %v, b = %v; want 3 and 0", a, b)
+		}
+	})
+}
+
+func TestPermissionResolverViewer(t *testing.T) {
+	ctx := context.Background()
+	newResolver := func() (*PermissionResolver, *fakePermissionRepo) {
+		repo := newPermissionRepo()
+		return NewPermissionResolver(repo, time.Minute), repo
+	}
+
+	t.Run("a holder of request:read_all can read everything", func(t *testing.T) {
+		r, _ := newResolver()
+		got, err := r.ViewerFor(ctx, &jwt.UserClaims{UserID: "EXT-9", Email: "all@mayora.com"})
+		if err != nil || got != (domain.Viewer{UserID: "usr_all", CanReadAll: true}) {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+	})
+
+	t.Run("without it the viewer is limited to their own requests", func(t *testing.T) {
+		r, _ := newResolver()
+		got, _ := r.ViewerFor(ctx, &jwt.UserClaims{UserID: "usr_own"})
+		if got != (domain.Viewer{UserID: "usr_own", CanReadAll: false}) {
+			t.Fatalf("got %+v", got)
+		}
+	})
+
+	t.Run("a master user can read everything and still has an identity", func(t *testing.T) {
+		r, _ := newResolver()
+		got, _ := r.ViewerFor(ctx, &jwt.UserClaims{UserID: "usr_own", IsMaster: true})
+		if got != (domain.Viewer{UserID: "usr_own", CanReadAll: true}) {
+			t.Fatalf("got %+v", got)
+		}
+	})
+
+	t.Run("an unknown user has no identity and cannot read everything", func(t *testing.T) {
+		r, _ := newResolver()
+		got, err := r.ViewerFor(ctx, &jwt.UserClaims{UserID: "EXT-9", Email: "ghost@mayora.com"})
+		if err != nil || got != (domain.Viewer{}) {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+	})
+
+	t.Run("a deactivated user is not trusted, even holding request:read_all", func(t *testing.T) {
+		r, _ := newResolver()
+		got, _ := r.ViewerFor(ctx, &jwt.UserClaims{UserID: "usr_off"})
+		if got != (domain.Viewer{}) {
+			t.Fatalf("got %+v, want nobody", got)
+		}
+	})
+
+	t.Run("permissions and viewer share one lookup", func(t *testing.T) {
+		r, repo := newResolver()
+		claims := &jwt.UserClaims{UserID: "usr_own"}
+		r.PermissionsFor(ctx, claims)
+		r.ViewerFor(ctx, claims)
+		if repo.permCalls != 1 {
+			t.Fatalf("permissions read %d times, want 1", repo.permCalls)
+		}
+	})
+
+	t.Run("a database error is returned", func(t *testing.T) {
+		r, repo := newResolver()
+		repo.err = errors.New("database unavailable")
+		if _, err := r.ViewerFor(ctx, &jwt.UserClaims{UserID: "usr_own"}); err == nil {
+			t.Fatal("expected the database error")
 		}
 	})
 }

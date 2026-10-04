@@ -10,6 +10,21 @@ import (
 
 var fulfillmentStages = []string{"Processing", "Shipped", "Delivered"}
 
+// revisionTag is the "Revision — <Role>" pill, naming the role that sent the
+// request back. If no step records that, it is just "Revision".
+func revisionTag(r domain.AssetRequest) fiber.Map {
+	for _, step := range r.Chain {
+		if step.Status == "revision" {
+			label := step.RoleLabel
+			if label == "" {
+				label = step.Role
+			}
+			return fiber.Map{"cls": "warn", "text": "Revision — " + label}
+		}
+	}
+	return fiber.Map{"cls": "warn", "text": "Revision"}
+}
+
 func computeStatusTag(r domain.AssetRequest) fiber.Map {
 	switch r.Status {
 	case domain.RequestStatusCompleted:
@@ -17,12 +32,12 @@ func computeStatusTag(r domain.AssetRequest) fiber.Map {
 	case domain.RequestStatusRejected:
 		for _, h := range r.Hist {
 			if strings.Contains(strings.ToLower(h.Action), "revision") {
-				return fiber.Map{"cls": "warn", "text": "Revision"}
+				return revisionTag(r)
 			}
 		}
 		return fiber.Map{"cls": "stop", "text": "Rejected"}
 	case domain.RequestStatusRevision:
-		return fiber.Map{"cls": "warn", "text": "Revision"}
+		return revisionTag(r)
 	case domain.RequestStatusFulfillment:
 		stage := "Processing"
 		if r.FulfillmentStep != nil && *r.FulfillmentStep >= 0 && *r.FulfillmentStep < len(fulfillmentStages) {
@@ -113,4 +128,3 @@ func mapRequest(r domain.AssetRequest) fiber.Map {
 		"currentStepName": r.CurrentStepName,
 	}
 }
-

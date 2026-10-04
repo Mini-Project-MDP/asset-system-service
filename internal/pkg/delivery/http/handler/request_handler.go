@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log"
 
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/delivery/http/middleware"
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/domain"
@@ -12,12 +14,34 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-type RequestHandler struct {
-	service domain.RequestService
+// ViewerResolver tells who the authenticated caller is in this system and how
+// much of the request list they may see. See service.PermissionResolver.
+type ViewerResolver interface {
+	ViewerFor(ctx context.Context, claims *jwt.UserClaims) (domain.Viewer, error)
 }
 
-func NewRequestHandler(requestService domain.RequestService) *RequestHandler {
-	return &RequestHandler{service: requestService}
+type RequestHandler struct {
+	service domain.RequestService
+	viewers ViewerResolver
+}
+
+func NewRequestHandler(requestService domain.RequestService, viewers ViewerResolver) *RequestHandler {
+	return &RequestHandler{service: requestService, viewers: viewers}
+}
+
+// viewerOf resolves the authenticated caller. ok is false when a response was
+// already written (no claims, or the lookup failed).
+func (h *RequestHandler) viewerOf(c fiber.Ctx) (viewer domain.Viewer, ok bool, err error) {
+	claims, found := c.Locals(middleware.UserContextKey).(*jwt.UserClaims)
+	if !found || claims == nil {
+		return domain.Viewer{}, false, response.Error(c, fiber.StatusUnauthorized, "Unauthorized context")
+	}
+	viewer, lookupErr := h.viewers.ViewerFor(c.Context(), claims)
+	if lookupErr != nil {
+		log.Printf("resolve viewer for %q: %v", claims.UserID, lookupErr)
+		return domain.Viewer{}, false, response.Error(c, fiber.StatusInternalServerError, "Unable to verify access")
+	}
+	return viewer, true, nil
 }
 
 type createRequestBody struct {
@@ -37,30 +61,59 @@ type createRequestBody struct {
 
 // List handles GET /api/v1/requests.
 // @Summary List asset requests
-// @Description Returns asset requests with optional text and category filters.
+// @Description Admin and Asset Team (request:read_all) see every request; everyone else sees only the requests they submitted or are the requester of. Filters combine.
 // @Tags Requests
 // @Produce json
 // @Security BearerAuth
 // @Param q query string false "Search request ID, outlet, or requester"
-// @Param type query string false "Asset category filter"
+// @Param type query string false "Asset category: Barcode, Android, Server (or All types)"
+// @Param status query string false "Waiting, In progress, Completed, Rejected, Revision (or All status)"
 // @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
 // @Failure 401 {object} response.Response
 // @Failure 500 {object} response.Response
 // @Router /api/v1/requests [get]
 func (h *RequestHandler) List(c fiber.Ctx) error {
-	items, err := h.service.List(c.Context(), domain.RequestFilter{
-		Query: c.Query("q"),
-		Type:  c.Query("type"),
-	})
+	viewer, ok, err := h.viewerOf(c)
+	if !ok {
+		return err
+	}
+	filter := listFilter(c)
+	if !viewer.CanReadAll {
+		if viewer.UserID == "" {
+			return response.Success(c, []fiber.Map{}) // no known identity: nothing is theirs
+		}
+		filter.VisibleToUser = viewer.UserID
+	}
+	items, err := h.service.List(c.Context(), filter)
 	if err != nil {
-		return response.Error(c, fiber.StatusInternalServerError, err.Error())
+		return requestErrorResponse(c, err)
+	}
+	return response.Success(c, mapRequestList(items))
+}
+
+func listFilter(c fiber.Ctx) domain.RequestFilter {
+	return domain.RequestFilter{
+		Query:  c.Query("q"),
+		Type:   c.Query("type"),
+		Status: c.Query("status"),
+	}
+}
+
+// listAll serves the Approvals and Fulfillment queues, which work on every
+// request (what a user may act on there is decided by their own permissions
+// and, for approvals, by the Approval Engine), not on the requester's own.
+func (h *RequestHandler) listAll(c fiber.Ctx) error {
+	items, err := h.service.List(c.Context(), listFilter(c))
+	if err != nil {
+		return requestErrorResponse(c, err)
 	}
 	return response.Success(c, mapRequestList(items))
 }
 
 // Detail handles GET /api/v1/requests/{id}.
 // @Summary Get asset request detail
-// @Description Returns a single asset request and its current workflow status.
+// @Description Returns a single asset request and its current workflow status. A request the caller may not see is answered with 404.
 // @Tags Requests
 // @Produce json
 // @Security BearerAuth
@@ -70,6 +123,19 @@ func (h *RequestHandler) List(c fiber.Ctx) error {
 // @Failure 404 {object} response.Response
 // @Router /api/v1/requests/{id} [get]
 func (h *RequestHandler) Detail(c fiber.Ctx) error {
+	viewer, ok, err := h.viewerOf(c)
+	if !ok {
+		return err
+	}
+	item, err := h.service.DetailFor(c.Context(), c.Params("id"), viewer)
+	if err != nil {
+		return requestErrorResponse(c, err)
+	}
+	return response.Success(c, mapRequest(*item))
+}
+
+// detailAll is Detail without the ownership rule, for the Approvals and Fulfillment screens.
+func (h *RequestHandler) detailAll(c fiber.Ctx) error {
 	item, err := h.service.Detail(c.Context(), c.Params("id"))
 	if err != nil {
 		return requestErrorResponse(c, err)
@@ -96,7 +162,13 @@ func (h *RequestHandler) Create(c fiber.Ctx) error {
 		return response.Error(c, fiber.StatusBadRequest, "Invalid request payload")
 	}
 
+	viewer, ok, err := h.viewerOf(c)
+	if !ok {
+		return err
+	}
+
 	item, err := h.service.Create(c.Context(), domain.CreateRequestInput{
+		CreatedBy:     viewer.UserID,
 		Category:      body.Category,
 		Outlet:        body.Outlet,
 		Distributor:   body.Distributor,
@@ -122,7 +194,7 @@ func (h *RequestHandler) Create(c fiber.Ctx) error {
 // @Success 200 {object} response.Response
 // @Failure 401 {object} response.Response
 // @Router /api/v1/approvals [get]
-func (h *RequestHandler) Approvals(c fiber.Ctx) error { return h.List(c) }
+func (h *RequestHandler) Approvals(c fiber.Ctx) error { return h.listAll(c) }
 
 // ApprovalDetail handles GET /api/v1/approvals/{id}.
 // @Summary Get approval request detail
@@ -134,7 +206,7 @@ func (h *RequestHandler) Approvals(c fiber.Ctx) error { return h.List(c) }
 // @Failure 401 {object} response.Response
 // @Failure 404 {object} response.Response
 // @Router /api/v1/approvals/{id} [get]
-func (h *RequestHandler) ApprovalDetail(c fiber.Ctx) error { return h.Detail(c) }
+func (h *RequestHandler) ApprovalDetail(c fiber.Ctx) error { return h.detailAll(c) }
 
 // ApprovalAction handles POST /api/v1/approvals/{id}/action.
 // @Summary Act on an approval request
@@ -181,7 +253,7 @@ func (h *RequestHandler) ApprovalAction(c fiber.Ctx) error {
 // @Success 200 {object} response.Response
 // @Failure 401 {object} response.Response
 // @Router /api/v1/fulfillment [get]
-func (h *RequestHandler) Fulfillment(c fiber.Ctx) error { return h.List(c) }
+func (h *RequestHandler) Fulfillment(c fiber.Ctx) error { return h.listAll(c) }
 
 // FulfillmentDetail handles GET /api/v1/fulfillment/{id}.
 // @Summary Get fulfillment request detail
@@ -193,7 +265,7 @@ func (h *RequestHandler) Fulfillment(c fiber.Ctx) error { return h.List(c) }
 // @Failure 401 {object} response.Response
 // @Failure 404 {object} response.Response
 // @Router /api/v1/fulfillment/{id} [get]
-func (h *RequestHandler) FulfillmentDetail(c fiber.Ctx) error { return h.Detail(c) }
+func (h *RequestHandler) FulfillmentDetail(c fiber.Ctx) error { return h.detailAll(c) }
 
 // SaveFulfillmentData handles POST /api/v1/fulfillment/{id}/data.
 // @Summary Save fulfillment data and move to Shipped
@@ -276,6 +348,8 @@ func requestErrorResponse(c fiber.Ctx, err error) error {
 		return response.Error(c, fiber.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrFulfillmentNotReady):
 		return response.Error(c, fiber.StatusConflict, "Request is not ready for this fulfillment step")
+	case errors.Is(err, service.ErrInvalidRequestFilter):
+		return response.Error(c, fiber.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrApprovalNotSynced):
 		return response.Error(c, fiber.StatusConflict, "Request has not synced with the approval engine yet, try again shortly")
 	case errors.As(err, &engineErr):

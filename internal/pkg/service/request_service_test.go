@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/domain"
@@ -26,10 +27,45 @@ type fakeRequestRepository struct {
 	}
 	steps   map[string][]domain.ApprovalStepItem
 	history map[string][]domain.ApprovalHistoryItem
+
+	lastListQuery domain.RequestListQuery
 }
 
-func (f *fakeRequestRepository) ListAll(ctx context.Context) ([]domain.AssetRequest, error) {
-	return f.items, nil
+// List mirrors the real repository's filtering: a substring match on id,
+// outlet or requester name (case-insensitive), an exact category, any of the
+// given statuses, and visibility to one user.
+func (f *fakeRequestRepository) List(ctx context.Context, q domain.RequestListQuery) ([]domain.AssetRequest, error) {
+	f.lastListQuery = q
+	search := strings.ToLower(q.Search)
+	var out []domain.AssetRequest
+	for _, r := range f.items {
+		if search != "" &&
+			!strings.Contains(strings.ToLower(r.ID), search) &&
+			!strings.Contains(strings.ToLower(r.Outlet), search) &&
+			!strings.Contains(strings.ToLower(r.RequesterName), search) {
+			continue
+		}
+		if q.Type != "" && r.Category != q.Type {
+			continue
+		}
+		if len(q.Statuses) > 0 && !containsString(q.Statuses, r.Status) {
+			continue
+		}
+		if q.VisibleToUser != "" && r.CreatedBy != q.VisibleToUser && r.RequesterID != q.VisibleToUser {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *fakeRequestRepository) GetByID(ctx context.Context, id string) (*domain.AssetRequest, error) {
@@ -87,6 +123,8 @@ func (f *fakeRequestRepository) Create(ctx context.Context, requesterID string, 
 		Quantity:      input.Qty,
 		Priority:      input.Priority,
 		RequesterName: input.RequesterName,
+		RequesterID:   requesterID,
+		CreatedBy:     input.CreatedBy,
 		Status:        domain.RequestStatusWaitingApproval,
 	})
 	return id, nil

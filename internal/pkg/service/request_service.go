@@ -24,28 +24,49 @@ func NewRequestService(repo domain.RequestRepository, engine domain.ApprovalEngi
 	return &requestService{repo: repo, engine: engine}
 }
 
-// List returns asset requests matching filter. Filtering is applied in
-// application code (not SQL) to preserve the original handler's behavior:
-// case-insensitive substring match on id+outlet+requester name, and an exact
-// category match unless the type filter is empty or "All types".
+// ErrInvalidRequestFilter: a list filter value is not one the API knows.
+var ErrInvalidRequestFilter = errors.New("invalid request filter")
+
+// statusesForFilter maps the status filter the UI offers to stored statuses:
+// Waiting is waiting for approval, In progress is everything past approval and
+// before completion (approved and waiting to be processed, or in fulfillment).
+// "" and "All status" mean no filter.
+func statusesForFilter(filter string) ([]string, error) {
+	switch strings.ToLower(strings.TrimSpace(filter)) {
+	case "", "all status":
+		return []string{}, nil
+	case strings.ToLower(domain.RequestStatusFilterWaiting):
+		return []string{domain.RequestStatusWaitingApproval}, nil
+	case strings.ToLower(domain.RequestStatusFilterInProgress):
+		return []string{domain.RequestStatusApproved, domain.RequestStatusFulfillment}, nil
+	case strings.ToLower(domain.RequestStatusFilterCompleted):
+		return []string{domain.RequestStatusCompleted}, nil
+	case strings.ToLower(domain.RequestStatusFilterRejected):
+		return []string{domain.RequestStatusRejected}, nil
+	case strings.ToLower(domain.RequestStatusFilterRevision):
+		return []string{domain.RequestStatusRevision}, nil
+	}
+	return nil, fmt.Errorf("%w: unknown status %q", ErrInvalidRequestFilter, filter)
+}
+
+// List returns the asset requests matching filter, newest first. Searching and
+// filtering happen in the database; this validates the filter and translates
+// the UI's labels ("In progress", "All types") into what the repository applies.
 func (s *requestService) List(ctx context.Context, filter domain.RequestFilter) ([]domain.AssetRequest, error) {
-	all, err := s.repo.ListAll(ctx)
+	statuses, err := statusesForFilter(filter.Status)
 	if err != nil {
 		return nil, err
 	}
-
-	q := strings.ToLower(strings.TrimSpace(filter.Query))
-	items := make([]domain.AssetRequest, 0, len(all))
-	for _, r := range all {
-		if q != "" && !strings.Contains(strings.ToLower(r.ID+r.Outlet+r.RequesterName), q) {
-			continue
-		}
-		if filter.Type != "" && filter.Type != "All types" && r.Category != filter.Type {
-			continue
-		}
-		items = append(items, r)
+	category := strings.TrimSpace(filter.Type)
+	if strings.EqualFold(category, "all types") {
+		category = ""
 	}
-	return items, nil
+	return s.repo.List(ctx, domain.RequestListQuery{
+		Search:        strings.TrimSpace(filter.Query),
+		Type:          category,
+		Statuses:      statuses,
+		VisibleToUser: filter.VisibleToUser,
+	})
 }
 
 func (s *requestService) Detail(ctx context.Context, id string) (*domain.AssetRequest, error) {
@@ -56,27 +77,54 @@ func (s *requestService) Detail(ctx context.Context, id string) (*domain.AssetRe
 	if item == nil {
 		return nil, ErrRequestNotFound
 	}
+	s.refreshFromEngine(ctx, item)
+	return item, nil
+}
 
-	// If engine is available and request is synced, refresh engine steps if needed
-	if s.engine != nil && item.ApprovalRequestID != nil && *item.ApprovalRequestID != "" {
-		engReq, engErr := s.engine.GetRequest(ctx, *item.ApprovalRequestID)
-		if engErr == nil && engReq != nil && len(engReq.Steps) > 0 {
-			hasRevision := false
-			for _, h := range item.Hist {
-				if h.Action == "Requested revision" {
-					hasRevision = true
-					break
-				}
-			}
-			steps := mapEngineStepsToItems(engReq, hasRevision)
-			if len(steps) > 0 {
-				_ = s.repo.SaveApprovalSteps(ctx, id, steps)
-				item.Chain = steps
-			}
+// canSee reports whether the viewer may see the request.
+func canSee(viewer domain.Viewer, r *domain.AssetRequest) bool {
+	if viewer.CanReadAll {
+		return true
+	}
+	return viewer.UserID != "" && (r.CreatedBy == viewer.UserID || r.RequesterID == viewer.UserID)
+}
+
+func (s *requestService) DetailFor(ctx context.Context, id string, viewer domain.Viewer) (*domain.AssetRequest, error) {
+	item, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// Someone else's request is reported exactly like a missing one, and the
+	// check comes before the engine round trip below.
+	if item == nil || !canSee(viewer, item) {
+		return nil, ErrRequestNotFound
+	}
+	s.refreshFromEngine(ctx, item)
+	return item, nil
+}
+
+// refreshFromEngine updates the cached approval steps of a request synced with
+// the Approval Engine, when the engine is reachable.
+func (s *requestService) refreshFromEngine(ctx context.Context, item *domain.AssetRequest) {
+	if s.engine == nil || item.ApprovalRequestID == nil || *item.ApprovalRequestID == "" {
+		return
+	}
+	engReq, engErr := s.engine.GetRequest(ctx, *item.ApprovalRequestID)
+	if engErr != nil || engReq == nil || len(engReq.Steps) == 0 {
+		return
+	}
+	hasRevision := false
+	for _, h := range item.Hist {
+		if h.Action == "Requested revision" {
+			hasRevision = true
+			break
 		}
 	}
-
-	return item, nil
+	steps := mapEngineStepsToItems(engReq, hasRevision)
+	if len(steps) > 0 {
+		_ = s.repo.SaveApprovalSteps(ctx, item.ID, steps)
+		item.Chain = steps
+	}
 }
 
 func (s *requestService) Create(ctx context.Context, input domain.CreateRequestInput) (*domain.AssetRequest, error) {

@@ -28,6 +28,9 @@ func ensureApprovalEngineColumns(ctx context.Context, db *sql.DB) error {
 		`ALTER TABLE asset_requests ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30)`,
 		`ALTER TABLE asset_requests ADD COLUMN IF NOT EXISTS current_step_name VARCHAR(100)`,
 		`ALTER TABLE asset_requests ADD COLUMN IF NOT EXISTS revised_from_id VARCHAR(36)`,
+		// who submitted the request (requester_id is who it is for)
+		`ALTER TABLE asset_requests ADD COLUMN IF NOT EXISTS created_by VARCHAR(36)`,
+		`CREATE INDEX IF NOT EXISTS idx_asset_requests_created_by ON asset_requests (created_by)`,
 		`ALTER TABLE request_history ADD COLUMN IF NOT EXISTS role VARCHAR(100)`,
 		`ALTER TABLE request_history ADD COLUMN IF NOT EXISTS event_type VARCHAR(20) DEFAULT 'go'`,
 	}
@@ -210,6 +213,7 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 		approval_status VARCHAR(30),
 		current_step_name VARCHAR(100),
 		revised_from_id VARCHAR(36),
+		created_by VARCHAR(36),
 		created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (requester_id) REFERENCES users(id),
@@ -284,7 +288,8 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 	('perm_ful_process', 'fulfillment:process', 'Process Fulfillment', 'Manage asset dispatch and fulfillment'),
 	('perm_ful_read', 'fulfillment:read', 'Read Fulfillment', 'View fulfillment statuses'),
 	('perm_set_manage', 'settings:manage', 'Manage Settings', 'Update system and application settings'),
-	('perm_dash_read', 'dashboard:read', 'Read Dashboard', 'View the dashboard overview (Admin and Asset Team)')
+	('perm_dash_read', 'dashboard:read', 'Read Dashboard', 'View the dashboard overview (Admin and Asset Team)'),
+	('perm_req_read_all', 'request:read_all', 'Read All Requests', 'See every request, not only the ones you submitted (Admin and Asset Team)')
 	ON CONFLICT (id) DO NOTHING;
 
 	INSERT INTO asset_types (id, code, name, identifier_type, identifier_required) VALUES
@@ -314,10 +319,10 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 	('role_master', 'perm_a_read'), ('role_master', 'perm_a_write'),
 	('role_master', 'perm_req_create'), ('role_master', 'perm_req_read'), ('role_master', 'perm_req_approve'),
 	('role_master', 'perm_ful_process'), ('role_master', 'perm_ful_read'),
-	('role_master', 'perm_set_manage'), ('role_master', 'perm_dash_read'),
+	('role_master', 'perm_set_manage'), ('role_master', 'perm_dash_read'), ('role_master', 'perm_req_read_all'),
 	('role_mgr', 'perm_u_read'), ('role_mgr', 'perm_a_read'), ('role_mgr', 'perm_a_write'),
 	('role_mgr', 'perm_req_create'), ('role_mgr', 'perm_req_read'), ('role_mgr', 'perm_req_approve'),
-	('role_mgr', 'perm_ful_process'), ('role_mgr', 'perm_ful_read'), ('role_mgr', 'perm_dash_read'),
+	('role_mgr', 'perm_ful_process'), ('role_mgr', 'perm_ful_read'), ('role_mgr', 'perm_dash_read'), ('role_mgr', 'perm_req_read_all'),
 	('role_appr', 'perm_u_read'), ('role_appr', 'perm_a_read'),
 	('role_appr', 'perm_req_create'), ('role_appr', 'perm_req_read'), ('role_appr', 'perm_req_approve'),
 	('role_staff', 'perm_u_read'), ('role_staff', 'perm_a_read'),

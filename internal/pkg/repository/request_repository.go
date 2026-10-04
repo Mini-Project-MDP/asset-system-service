@@ -9,6 +9,7 @@ import (
 
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/domain"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type requestRepository struct {
@@ -31,7 +32,7 @@ const requestSelectColumns = `
 	ar.id, at.code, o.name, ar.quantity, ar.priority, d.name, ar.sales_division,
 	ar.request_type, u.name, ar.created_at, ar.current_step, ar.fulfillment_step,
 	ar.fulfillment_data, ar.status, ar.approval_request_id, ar.approval_status,
-	ar.current_step_name, ar.revised_from_id
+	ar.current_step_name, ar.revised_from_id, ar.requester_id, ar.created_by
 `
 
 const requestSelectFrom = `
@@ -45,7 +46,7 @@ const requestSelectFrom = `
 func scanAssetRequest(scanner interface{ Scan(...any) error }) (domain.AssetRequest, error) {
 	var r domain.AssetRequest
 	var categoryNS, outletNS, distributorNS, reqTypeNS, fulfillDataNS sql.NullString
-	var approvalRequestIDNS, approvalStatusNS, currentStepNameNS, revisedFromIDNS sql.NullString
+	var approvalRequestIDNS, approvalStatusNS, currentStepNameNS, revisedFromIDNS, createdByNS sql.NullString
 	var fulfill sql.NullInt64
 
 	if err := scanner.Scan(
@@ -53,6 +54,7 @@ func scanAssetRequest(scanner interface{ Scan(...any) error }) (domain.AssetRequ
 		&r.SalesDivision, &reqTypeNS, &r.RequesterName, &r.CreatedAt, &r.CurrentStep,
 		&fulfill, &fulfillDataNS, &r.Status,
 		&approvalRequestIDNS, &approvalStatusNS, &currentStepNameNS, &revisedFromIDNS,
+		&r.RequesterID, &createdByNS,
 	); err != nil {
 		return domain.AssetRequest{}, err
 	}
@@ -78,91 +80,121 @@ func scanAssetRequest(scanner interface{ Scan(...any) error }) (domain.AssetRequ
 	if revisedFromIDNS.Valid {
 		r.RevisedFromID = &revisedFromIDNS.String
 	}
+	r.CreatedBy = createdByNS.String
 	return r, nil
 }
 
-func (repo *requestRepository) ListAll(ctx context.Context) ([]domain.AssetRequest, error) {
-	rows, err := repo.db.QueryContext(ctx, `SELECT`+requestSelectColumns+requestSelectFrom+`ORDER BY ar.created_at DESC`)
+// escapeLike makes user input match literally inside a LIKE pattern, where
+// backslash, % and _ are special.
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
+// List returns the requests matching the query, newest first, each with its
+// approval chain and history. All filtering happens in SQL, and the chain and
+// history are read only for the rows returned.
+func (repo *requestRepository) List(ctx context.Context, q domain.RequestListQuery) ([]domain.AssetRequest, error) {
+	statuses := q.Statuses
+	if statuses == nil {
+		statuses = []string{} // an empty array, not NULL: cardinality(NULL) would filter everything out
+	}
+	rows, err := repo.db.QueryContext(ctx, `SELECT`+requestSelectColumns+requestSelectFrom+`
+		WHERE ($1 = '' OR ar.id ILIKE $2 OR o.name ILIKE $2 OR u.name ILIKE $2)
+		  AND ($3 = '' OR at.code = $3)
+		  AND (cardinality($4::text[]) = 0 OR ar.status = ANY($4::text[]))
+		  AND ($5 = '' OR ar.created_by = $5 OR ar.requester_id = $5)
+		ORDER BY ar.created_at DESC, ar.id`,
+		q.Search, "%"+escapeLike(q.Search)+"%", q.Type, pq.Array(statuses), q.VisibleToUser)
 	if err != nil {
 		return nil, fmt.Errorf("list asset requests: %w", err)
 	}
 	defer rows.Close()
 
 	items := make([]domain.AssetRequest, 0)
+	ids := make([]string, 0)
 	for rows.Next() {
 		item, err := scanAssetRequest(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan asset request row: %w", err)
 		}
 		items = append(items, item)
+		ids = append(ids, item.ID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate asset request rows: %w", err)
 	}
-
 	if len(items) == 0 {
 		return items, nil
 	}
+	if err := repo.attachChainAndHistory(ctx, items, ids); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
-	// Batch load approval steps for all requests
-	stepRows, sErr := repo.db.QueryContext(ctx, `
+// attachChainAndHistory fills Chain and Hist of items (whose ids are ids) with
+// two queries, however many items there are.
+func (repo *requestRepository) attachChainAndHistory(ctx context.Context, items []domain.AssetRequest, ids []string) error {
+	stepRows, err := repo.db.QueryContext(ctx, `
 		SELECT request_id, role_code, role_label, status
 		FROM request_approval_steps
-		ORDER BY step_order ASC
-	`)
-	if sErr == nil {
-		defer stepRows.Close()
-		stepsMap := make(map[string][]domain.ApprovalStepItem)
-		for stepRows.Next() {
-			var reqID, role, roleLabel, status string
-			if err := stepRows.Scan(&reqID, &role, &roleLabel, &status); err == nil {
-				stepsMap[reqID] = append(stepsMap[reqID], domain.ApprovalStepItem{
-					Role:      role,
-					RoleLabel: roleLabel,
-					Status:    status,
-				})
-			}
+		WHERE request_id = ANY($1::text[])
+		ORDER BY request_id, step_order ASC`, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("list approval steps: %w", err)
+	}
+	defer stepRows.Close()
+	steps := make(map[string][]domain.ApprovalStepItem, len(items))
+	for stepRows.Next() {
+		var requestID string
+		var step domain.ApprovalStepItem
+		if err := stepRows.Scan(&requestID, &step.Role, &step.RoleLabel, &step.Status); err != nil {
+			return fmt.Errorf("scan approval step: %w", err)
 		}
-		for i := range items {
-			if s, ok := stepsMap[items[i].ID]; ok {
-				items[i].Chain = s
-			} else {
-				items[i].Chain = []domain.ApprovalStepItem{}
-			}
-		}
+		steps[requestID] = append(steps[requestID], step)
+	}
+	if err := stepRows.Err(); err != nil {
+		return err
 	}
 
-	// Batch load history for all requests
-	histRows, hErr := repo.db.QueryContext(ctx, `
+	histRows, err := repo.db.QueryContext(ctx, `
 		SELECT request_id, role, action, event_type, comment, created_at
 		FROM request_history
-		ORDER BY created_at ASC
-	`)
-	if hErr == nil {
-		defer histRows.Close()
-		histMap := make(map[string][]domain.ApprovalHistoryItem)
-		for histRows.Next() {
-			var reqID string
-			var roleNS, commentNS sql.NullString
-			var h domain.ApprovalHistoryItem
-			if err := histRows.Scan(&reqID, &roleNS, &h.Action, &h.Type, &commentNS, &h.Date); err == nil {
-				h.Role = roleNS.String
-				if commentNS.Valid {
-					h.Comment = &commentNS.String
-				}
-				histMap[reqID] = append(histMap[reqID], h)
-			}
+		WHERE request_id = ANY($1::text[])
+		ORDER BY created_at ASC`, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("list request history: %w", err)
+	}
+	defer histRows.Close()
+	history := make(map[string][]domain.ApprovalHistoryItem, len(items))
+	for histRows.Next() {
+		var requestID string
+		var roleNS, commentNS sql.NullString
+		var h domain.ApprovalHistoryItem
+		if err := histRows.Scan(&requestID, &roleNS, &h.Action, &h.Type, &commentNS, &h.Date); err != nil {
+			return fmt.Errorf("scan request history: %w", err)
 		}
-		for i := range items {
-			if h, ok := histMap[items[i].ID]; ok {
-				items[i].Hist = h
-			} else {
-				items[i].Hist = []domain.ApprovalHistoryItem{}
-			}
+		h.Role = roleNS.String
+		if commentNS.Valid {
+			h.Comment = &commentNS.String
 		}
+		history[requestID] = append(history[requestID], h)
+	}
+	if err := histRows.Err(); err != nil {
+		return err
 	}
 
-	return items, nil
+	for i := range items {
+		items[i].Chain = steps[items[i].ID]
+		if items[i].Chain == nil {
+			items[i].Chain = []domain.ApprovalStepItem{}
+		}
+		items[i].Hist = history[items[i].ID]
+		if items[i].Hist == nil {
+			items[i].Hist = []domain.ApprovalHistoryItem{}
+		}
+	}
+	return nil
 }
 
 func (repo *requestRepository) GetByID(ctx context.Context, id string) (*domain.AssetRequest, error) {
@@ -259,9 +291,9 @@ func (repo *requestRepository) Create(ctx context.Context, requesterID string, i
 
 	_, err := repo.db.ExecContext(ctx, `
 		INSERT INTO asset_requests
-			(id, requester_id, asset_type_id, outlet_id, distributor_id, sales_division, request_type, quantity, priority, status, current_step, fulfillment_step, revised_from_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, NULL, $11)
-	`, id, requesterID, assetTypeID, outletID, distributorID, input.SalesDivision, input.ReqType, input.Qty, input.Priority, domain.RequestStatusWaitingApproval, input.RevisedFromID)
+			(id, requester_id, asset_type_id, outlet_id, distributor_id, sales_division, request_type, quantity, priority, status, current_step, fulfillment_step, revised_from_id, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, NULL, $11, NULLIF($12::text, ''))
+	`, id, requesterID, assetTypeID, outletID, distributorID, input.SalesDivision, input.ReqType, input.Qty, input.Priority, domain.RequestStatusWaitingApproval, input.RevisedFromID, input.CreatedBy)
 	if err != nil {
 		return "", fmt.Errorf("insert asset request: %w", err)
 	}
