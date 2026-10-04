@@ -243,3 +243,113 @@ func TestRequestFormSourceSQL(t *testing.T) {
 		}
 	}
 }
+
+func TestBarcodeBreakdownSQL(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewRequestRepository(db)
+	ctx := context.Background()
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM asset_requests WHERE requester_name LIKE 'ITEST BD%'`) })
+
+	base := domain.CreateRequestInput{
+		Category: "Barcode", SalesDivision: "M1 BIS", RequesterName: "ITEST BD Laras", RequesterRole: "SA",
+		Qty: 6, Priority: "normal", CreatedBy: "usr_master1",
+		Breakdown: []domain.QuantityBreakdownItem{{Kind: "Buffer Stock", Quantity: 3}, {Kind: "Rusak", Quantity: 2}, {Kind: "NOO", Quantity: 1}},
+	}
+
+	t.Run("the breakdown is stored with the request and read back in the document's order", func(t *testing.T) {
+		id, err := repo.Create(ctx, "usr_master1", base)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		got, err := repo.GetByID(ctx, id)
+		if err != nil || got == nil {
+			t.Fatalf("get: %v, %v", got, err)
+		}
+		want := []domain.QuantityBreakdownItem{{Kind: "Rusak", Quantity: 2}, {Kind: "NOO", Quantity: 1}, {Kind: "Buffer Stock", Quantity: 3}}
+		if len(got.Breakdown) != 3 || got.Breakdown[0] != want[0] || got.Breakdown[1] != want[1] || got.Breakdown[2] != want[2] {
+			t.Fatalf("breakdown = %+v, want %+v", got.Breakdown, want)
+		}
+
+		items, err := repo.List(ctx, domain.RequestListQuery{Search: "ITEST BD Laras"})
+		if err != nil || len(items) != 1 || len(items[0].Breakdown) != 3 {
+			t.Fatalf("list: %d items (err %v), breakdown %+v", len(items), err, items)
+		}
+		byEngine, _ := repo.GetByApprovalRequestID(ctx, "nope")
+		if byEngine != nil {
+			t.Fatalf("unexpected request for an unknown engine id")
+		}
+	})
+
+	t.Run("a request without a breakdown reads back with none", func(t *testing.T) {
+		in := base
+		in.Category, in.Breakdown, in.Qty = "Server", nil, 2
+		id, err := repo.Create(ctx, "usr_master1", in)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		got, _ := repo.GetByID(ctx, id)
+		if got == nil || len(got.Breakdown) != 0 {
+			t.Fatalf("breakdown = %+v, want none", got)
+		}
+	})
+
+	t.Run("the request and its breakdown are written together: a bad row leaves nothing behind", func(t *testing.T) {
+		before := countRows(t, db, `SELECT COUNT(*) FROM asset_requests WHERE requester_name = 'ITEST BD Atomic'`)
+		in := base
+		in.RequesterName = "ITEST BD Atomic"
+		in.Breakdown = []domain.QuantityBreakdownItem{{Kind: "Rusak", Quantity: 2}, {Kind: "Hilang", Quantity: 0}} // the table refuses a zero count
+		if _, err := repo.Create(ctx, "usr_master1", in); err == nil {
+			t.Fatal("expected the create to fail")
+		}
+		if after := countRows(t, db, `SELECT COUNT(*) FROM asset_requests WHERE requester_name = 'ITEST BD Atomic'`); after != before {
+			t.Fatalf("%d request rows were left behind", after-before)
+		}
+	})
+
+	t.Run("deleting a request removes its breakdown", func(t *testing.T) {
+		id, err := repo.Create(ctx, "usr_master1", base)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if _, err := db.Exec(`DELETE FROM asset_requests WHERE id = $1`, id); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		if n := countRows(t, db, `SELECT COUNT(*) FROM request_quantity_breakdown WHERE request_id = '`+id+`'`); n != 0 {
+			t.Fatalf("%d breakdown rows survived", n)
+		}
+	})
+}
+
+func TestMobilePrinterAssetTypeSQL(t *testing.T) {
+	db := openTestDB(t)
+	var code, identifier string
+	var required int
+	if err := db.QueryRow(`SELECT code, identifier_type, identifier_required FROM asset_types WHERE id = 'atype_mobile_printer'`).Scan(&code, &identifier, &required); err != nil {
+		t.Fatalf("Mobile Printer asset type is missing: %v", err)
+	}
+	if code != "Mobile Printer" || identifier != "SERIAL_NUMBER" || required != 1 {
+		t.Errorf("asset type = %q / %q / %d, want Mobile Printer / SERIAL_NUMBER / 1", code, identifier, required)
+	}
+
+	repo := NewRequestRepository(db)
+	id, err := repo.Create(context.Background(), "usr_master1", domain.CreateRequestInput{
+		Category: "Mobile Printer", SalesDivision: "M3", RequesterName: "ITEST BD Printer", RequesterRole: "Cabang", Qty: 2, Priority: "normal",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM asset_requests WHERE id = $1`, id) })
+	got, _ := repo.GetByID(context.Background(), id)
+	if got == nil || got.Category != "Mobile Printer" {
+		t.Fatalf("category = %+v, want Mobile Printer", got)
+	}
+}
+
+func countRows(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(query).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	return n
+}

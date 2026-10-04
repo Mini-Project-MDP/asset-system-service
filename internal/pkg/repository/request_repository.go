@@ -133,6 +133,9 @@ func (repo *requestRepository) List(ctx context.Context, q domain.RequestListQue
 	if err := repo.attachChainAndHistory(ctx, items, ids); err != nil {
 		return nil, err
 	}
+	if err := repo.attachBreakdown(ctx, items, ids); err != nil {
+		return nil, err
+	}
 	return items, nil
 }
 
@@ -225,6 +228,12 @@ func (repo *requestRepository) GetByID(ctx context.Context, id string) (*domain.
 		item.Hist = []domain.ApprovalHistoryItem{}
 	}
 
+	one := []domain.AssetRequest{item}
+	if err := repo.attachBreakdown(ctx, one, []string{item.ID}); err != nil {
+		return nil, err
+	}
+	item = one[0]
+
 	return &item, nil
 }
 
@@ -251,6 +260,12 @@ func (repo *requestRepository) GetByApprovalRequestID(ctx context.Context, appro
 	} else {
 		item.Hist = []domain.ApprovalHistoryItem{}
 	}
+
+	one := []domain.AssetRequest{item}
+	if err := repo.attachBreakdown(ctx, one, []string{item.ID}); err != nil {
+		return nil, err
+	}
+	item = one[0]
 
 	return &item, nil
 }
@@ -301,7 +316,14 @@ func (repo *requestRepository) Create(ctx context.Context, requesterID string, i
 
 	// The service has already matched the distributor and outlet against master
 	// data and passes their ids; empty means "none" (a distributor typed by hand).
-	_, err := repo.db.ExecContext(ctx, `
+	// The request and its breakdown are written together or not at all.
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("begin create request: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO asset_requests
 			(id, requester_id, asset_type_id, outlet_id, distributor_id, distributor_manual, sales_division, request_type, quantity, priority, status, current_step, fulfillment_step, revised_from_id, created_by, requester_name, requester_role)
 		VALUES ($1, $2, $3, NULLIF($4::text, ''), NULLIF($5::text, ''), NULLIF($6::text, ''), $7, NULLIF($8::text, ''), $9, $10, $11, 0, NULL, $12, NULLIF($13::text, ''), NULLIF($14::text, ''), NULLIF($15::text, ''))
@@ -309,6 +331,16 @@ func (repo *requestRepository) Create(ctx context.Context, requesterID string, i
 		input.Qty, input.Priority, domain.RequestStatusWaitingApproval, input.RevisedFromID, input.CreatedBy, input.RequesterName, input.RequesterRole)
 	if err != nil {
 		return "", fmt.Errorf("insert asset request: %w", err)
+	}
+	for _, item := range input.Breakdown {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO request_quantity_breakdown (request_id, kind, quantity) VALUES ($1, $2, $3)`,
+			id, item.Kind, item.Quantity); err != nil {
+			return "", fmt.Errorf("insert request breakdown: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit create request: %w", err)
 	}
 	return id, nil
 }
@@ -519,3 +551,34 @@ func (repo *requestRepository) GetHistory(ctx context.Context, requestID string)
 	return history, rows.Err()
 }
 
+// barcodeKindOrder lists the Tipe Pengajuan in the order the document gives them.
+const barcodeKindOrder = `ARRAY['Rusak','Hilang','NOO','Buffer Stock']`
+
+// attachBreakdown fills Breakdown of items (whose ids are ids) with one query.
+func (repo *requestRepository) attachBreakdown(ctx context.Context, items []domain.AssetRequest, ids []string) error {
+	rows, err := repo.db.QueryContext(ctx, `
+		SELECT request_id, kind, quantity FROM request_quantity_breakdown
+		WHERE request_id = ANY($1::text[])
+		ORDER BY request_id, COALESCE(array_position(`+barcodeKindOrder+`, kind), 99), kind`, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("list request breakdown: %w", err)
+	}
+	defer rows.Close()
+
+	byRequest := make(map[string][]domain.QuantityBreakdownItem, len(items))
+	for rows.Next() {
+		var requestID string
+		var item domain.QuantityBreakdownItem
+		if err := rows.Scan(&requestID, &item.Kind, &item.Quantity); err != nil {
+			return fmt.Errorf("scan request breakdown: %w", err)
+		}
+		byRequest[requestID] = append(byRequest[requestID], item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range items {
+		items[i].Breakdown = byRequest[items[i].ID]
+	}
+	return nil
+}

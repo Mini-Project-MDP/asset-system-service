@@ -8,6 +8,8 @@ const (
 	CategoryBarcode = "Barcode"
 	CategoryAndroid = "Android"
 	CategoryServer  = "Server"
+	// CategoryMobilePrinter: new requests only, never a replacement.
+	CategoryMobilePrinter = "Mobile Printer"
 )
 
 // Request types, asked for Android requests only.
@@ -22,6 +24,20 @@ const (
 	PriorityHigh   = "high"
 	PriorityUrgent = "urgent"
 )
+
+// Barcode requests say why the units are needed (Tipe Pengajuan), with a count per reason.
+const (
+	BarcodeKindDamaged     = "Rusak"
+	BarcodeKindLost        = "Hilang"
+	BarcodeKindNewOutlet   = "NOO" // new outlet
+	BarcodeKindBufferStock = "Buffer Stock"
+)
+
+// QuantityBreakdownItem is how many units of a request are for one reason.
+type QuantityBreakdownItem struct {
+	Kind     string
+	Quantity int
+}
 
 // RequesterRoleOption is one entry of the Requester Role select.
 type RequesterRoleOption struct {
@@ -50,7 +66,9 @@ type RequestFormOptions struct {
 	Outlets        []OutletRef
 	SalesDivisions []string
 	RequestTypes   []string
-	Priorities     []string
+	// BarcodeKinds are the Tipe Pengajuan choices of a Barcode request.
+	BarcodeKinds []string
+	Priorities   []string
 	// RequesterRoles lists the roles allowed per category.
 	RequesterRoles map[string][]RequesterRoleOption
 }

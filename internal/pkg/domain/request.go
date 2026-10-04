@@ -74,6 +74,8 @@ type AssetRequest struct {
 	CreatedBy   string
 	// RequesterRole is the role chosen on the form (SA, SS, ..., Cabang); empty for older requests.
 	RequesterRole string
+	// Breakdown is the count per Tipe Pengajuan of a Barcode request (empty for other categories and older requests).
+	Breakdown []QuantityBreakdownItem
 
 	Chain []ApprovalStepItem
 	Hist  []ApprovalHistoryItem
@@ -150,6 +152,8 @@ type CreateRequestInput struct {
 	// above are matched against master data; the repository stores them.
 	DistributorID string
 	OutletID      string
+	// Breakdown is the count per Tipe Pengajuan, required for Barcode; Qty must be its total.
+	Breakdown []QuantityBreakdownItem
 	// RevisedFromID links this request to the one it resubmits after a
 	// "revision" decision (see Fase 0 in approval-engine-integration-plan.md:
 	// revision = rejected + brand new request, not an in-place edit). Nil for

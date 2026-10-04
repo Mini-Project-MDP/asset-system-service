@@ -242,6 +242,14 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 		FOREIGN KEY (revised_from_id) REFERENCES asset_requests(id)
 	);
 
+	-- How many units of a Barcode request are for each reason (Tipe Pengajuan).
+	CREATE TABLE IF NOT EXISTS request_quantity_breakdown (
+		request_id VARCHAR(36) NOT NULL REFERENCES asset_requests(id) ON DELETE CASCADE,
+		kind VARCHAR(50) NOT NULL,
+		quantity INTEGER NOT NULL CHECK (quantity > 0),
+		PRIMARY KEY (request_id, kind)
+	);
+
 	CREATE TABLE IF NOT EXISTS request_approval_steps (
 		id VARCHAR(36) PRIMARY KEY,
 		request_id VARCHAR(36) NOT NULL,
@@ -323,7 +331,8 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 	INSERT INTO asset_types (id, code, name, identifier_type, identifier_required) VALUES
 	('atype_barcode', 'Barcode', 'Barcode Scanner', 'SERIAL_NUMBER', 1),
 	('atype_android', 'Android', 'Android Device', 'SERIAL_NUMBER', 1),
-	('atype_server', 'Server', 'Server', 'SERIAL_NUMBER', 1)
+	('atype_server', 'Server', 'Server', 'SERIAL_NUMBER', 1),
+	('atype_mobile_printer', 'Mobile Printer', 'Mobile Printer', 'SERIAL_NUMBER', 1)
 	ON CONFLICT (id) DO NOTHING;
 
 	INSERT INTO roles (id, code, name, role_type, approval_rank) VALUES

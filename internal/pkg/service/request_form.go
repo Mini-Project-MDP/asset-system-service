@@ -42,7 +42,9 @@ func WithFormSource(source domain.RequestFormSource) RequestServiceOption {
 const maxManualDistributorLength = 150
 
 var (
-	requestCategories = []string{domain.CategoryBarcode, domain.CategoryAndroid, domain.CategoryServer}
+	requestCategories = []string{domain.CategoryBarcode, domain.CategoryAndroid, domain.CategoryServer, domain.CategoryMobilePrinter}
+	// barcodeKinds are the Tipe Pengajuan of a Barcode request, in the order the document lists them.
+	barcodeKinds      = []string{domain.BarcodeKindDamaged, domain.BarcodeKindLost, domain.BarcodeKindNewOutlet, domain.BarcodeKindBufferStock}
 	requestTypes      = []string{domain.RequestTypeNew, domain.RequestTypeRenewal}
 	requestPriorities = []string{domain.PriorityNormal, domain.PriorityHigh, domain.PriorityUrgent}
 )
@@ -63,6 +65,8 @@ var requesterRolesByCategory = map[string][]string{
 	domain.CategoryBarcode: {"SA", "SS", "RSM", "GRSM", "NSM", "SD"},
 	domain.CategoryAndroid: {"Cabang", "SD"},
 	domain.CategoryServer:  {"Cabang", "SD"},
+	// Mobile Printer follows Server (a branch or the Sales Director) until the business fixes its hierarchy.
+	domain.CategoryMobilePrinter: {"Cabang", "SD"},
 }
 
 func containsFold(list []string, value string) (string, bool) {
@@ -114,6 +118,7 @@ func (s *requestService) FormOptions(ctx context.Context) (*domain.RequestFormOp
 		Outlets:        outlets,
 		SalesDivisions: data.SalesDivisions,
 		RequestTypes:   requestTypes,
+		BarcodeKinds:   barcodeKinds,
 		Priorities:     requestPriorities,
 		RequesterRoles: roles,
 	}, nil
@@ -235,8 +240,23 @@ func validateCreate(in domain.CreateRequestInput, data *domain.FormMasterData) (
 		return in, invalidField("requesterName", "Nama requester wajib diisi.")
 	}
 
-	if in.Qty < 1 {
-		return in, invalidField("qty", "Quantity minimal 1.")
+	// Quantity. A Barcode request counts its units by reason (Tipe Pengajuan) and
+	// its total is their sum; the server holds the client to that. Every other
+	// category just has a quantity.
+	if in.Category == domain.CategoryBarcode {
+		items, total, err := normalizeBreakdown(in.Breakdown)
+		if err != nil {
+			return in, err
+		}
+		if in.Qty != total {
+			return in, invalidField("qty", "Total Request harus sama dengan jumlah semua Tipe Pengajuan (%d).", total)
+		}
+		in.Breakdown = items
+	} else {
+		in.Breakdown = nil
+		if in.Qty < 1 {
+			return in, invalidField("qty", "Quantity minimal 1.")
+		}
 	}
 
 	if strings.TrimSpace(in.Priority) == "" {
@@ -295,4 +315,37 @@ func (s *requestService) resolveRequester(ctx context.Context, in domain.CreateR
 		return nil, ErrRequesterNotFound
 	}
 	return submitter, nil
+}
+
+// normalizeBreakdown checks a Barcode request's Tipe Pengajuan counts and
+// returns the kinds with a count above zero, in the document's order, and their
+// total. Kind names are matched ignoring case; a kind may appear once.
+func normalizeBreakdown(items []domain.QuantityBreakdownItem) ([]domain.QuantityBreakdownItem, int, error) {
+	counts := make(map[string]int, len(barcodeKinds))
+	for _, item := range items {
+		kind, ok := containsFold(barcodeKinds, strings.TrimSpace(item.Kind))
+		if !ok {
+			return nil, 0, invalidField("breakdown", "Tipe Pengajuan %q tidak dikenal (pilih %s).", item.Kind, strings.Join(barcodeKinds, ", "))
+		}
+		if item.Quantity < 0 {
+			return nil, 0, invalidField("breakdown", "Jumlah untuk %s tidak boleh negatif.", kind)
+		}
+		if _, dup := counts[kind]; dup {
+			return nil, 0, invalidField("breakdown", "Tipe Pengajuan %s diisi lebih dari sekali.", kind)
+		}
+		counts[kind] = item.Quantity
+	}
+
+	var kept []domain.QuantityBreakdownItem
+	total := 0
+	for _, kind := range barcodeKinds {
+		if n := counts[kind]; n > 0 {
+			kept = append(kept, domain.QuantityBreakdownItem{Kind: kind, Quantity: n})
+			total += n
+		}
+	}
+	if total == 0 {
+		return nil, 0, invalidField("breakdown", "Isi jumlah untuk minimal satu Tipe Pengajuan.")
+	}
+	return kept, total, nil
 }

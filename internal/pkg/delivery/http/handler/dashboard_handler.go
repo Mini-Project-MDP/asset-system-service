@@ -77,7 +77,7 @@ func mapDashboard(o domain.DashboardOverview) fiber.Map {
 	for _, m := range o.Months {
 		chart = append(chart, fiber.Map{
 			"month":   time.Month(m.Month).String()[:3],
-			"barcode": m.Barcode, "android": m.Android, "server": m.Server,
+			"barcode": m.Barcode, "android": m.Android, "server": m.Server, "mobilePrinter": m.MobilePrinter,
 		})
 	}
 

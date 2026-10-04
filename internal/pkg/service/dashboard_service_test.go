@@ -118,9 +118,10 @@ func TestDashboardChartFolding(t *testing.T) {
 		{Month: 1, Category: "Barcode", Count: 6},
 		{Month: 1, Category: "Android", Count: 5},
 		{Month: 3, Category: "Server", Count: 2},
-		{Month: 3, Category: "Mobile Printer", Count: 9}, // not on the chart (yet)
-		{Month: 13, Category: "Barcode", Count: 9},       // not a month
-		{Month: 12, Category: "Barcode", Count: 9},       // after the current month of the current year
+		{Month: 3, Category: "Mobile Printer", Count: 9},
+		{Month: 3, Category: "Hologram", Count: 4}, // not a category the chart knows
+		{Month: 13, Category: "Barcode", Count: 9}, // not a month
+		{Month: 12, Category: "Barcode", Count: 9}, // after the current month of the current year
 	}}
 	got, err := newDashboard(repo, now).Overview(context.Background(), 2026)
 	if err != nil {
@@ -130,8 +131,8 @@ func TestDashboardChartFolding(t *testing.T) {
 	if jan.Barcode != 6 || jan.Android != 5 || jan.Server != 0 {
 		t.Errorf("january = %+v, want 6/5/0", jan)
 	}
-	if mar.Server != 2 || mar.Barcode != 0 {
-		t.Errorf("march = %+v, want server 2 only", mar)
+	if mar.Server != 2 || mar.MobilePrinter != 9 || mar.Barcode != 0 {
+		t.Errorf("march = %+v, want server 2 and mobile printer 9", mar)
 	}
 	if feb.Barcode+feb.Android+feb.Server != 0 {
 		t.Errorf("february = %+v, want zeros", feb)

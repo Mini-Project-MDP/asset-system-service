@@ -122,6 +122,7 @@ func mapRequest(r domain.AssetRequest) fiber.Map {
 		"hist":            hist,
 		"statusTag":       computeStatusTag(r),
 		"fulfillStep":     fulfillStep,
+		"breakdown":       mapBreakdown(r.Breakdown),
 		"fulfillData":     parseFulfillmentData(r.FulfillmentData),
 		"revisedFromId":   r.RevisedFromID,
 		"approvalStatus":  r.ApprovalStatus,
@@ -156,6 +157,7 @@ func mapFormOptions(o domain.RequestFormOptions) fiber.Map {
 		"outlets":        refs(o.Outlets),
 		"salesDivisions": o.SalesDivisions,
 		"requestTypes":   o.RequestTypes,
+		"barcodeKinds":   o.BarcodeKinds,
 		"priorities":     o.Priorities,
 		"requesterRoles": roles,
 	}
@@ -168,4 +170,13 @@ func requesterRoleOrDefault(role string) string {
 		return "Requester"
 	}
 	return role
+}
+
+// mapBreakdown lists the count per Tipe Pengajuan; it is empty for requests that have none.
+func mapBreakdown(items []domain.QuantityBreakdownItem) []fiber.Map {
+	out := make([]fiber.Map, 0, len(items))
+	for _, item := range items {
+		out = append(out, fiber.Map{"type": item.Kind, "qty": item.Quantity})
+	}
+	return out
 }

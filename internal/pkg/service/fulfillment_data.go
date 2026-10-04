@@ -33,6 +33,11 @@ type barcodeData struct {
 	Codes []string `json:"codes"`
 }
 
+// serialData is the data of a Mobile Printer request: one serial number per unit.
+type serialData struct {
+	Serials []string `json:"serials"`
+}
+
 type androidUnit struct {
 	IMEI        string `json:"imei"`
 	Brand       string `json:"brand"`
@@ -57,6 +62,7 @@ type serverData struct {
 //   - Android: exactly qty units, each with IMEI (14-16 digits, no duplicates),
 //     brand, model and two 4-digit years.
 //   - Server: a non-empty free-text spec, recorded once for the whole request.
+//   - Mobile Printer: exactly qty serial numbers, none empty, no duplicates.
 func validateFulfillmentData(category string, qty int, raw string) (string, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &object); err != nil || object == nil {
@@ -70,6 +76,8 @@ func validateFulfillmentData(category string, qty int, raw string) (string, erro
 		return validateAndroidData(qty, raw)
 	case "Server":
 		return validateServerData(raw)
+	case "Mobile Printer":
+		return validateSerialData(qty, raw)
 	default:
 		return "", invalidData("unsupported category %q", category)
 	}
@@ -88,22 +96,43 @@ func validateBarcodeData(qty int, raw string) (string, error) {
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		return "", invalidData("codes must be a list of strings")
 	}
-	if len(data.Codes) != qty {
-		return "", invalidData("expected %d barcode codes, got %d", qty, len(data.Codes))
-	}
-	seen := make(map[string]int, qty)
-	for i, code := range data.Codes {
-		code = strings.TrimSpace(code)
-		if code == "" {
-			return "", invalidData("barcode code %d of %d is empty", i+1, qty)
-		}
-		if first, dup := seen[code]; dup {
-			return "", invalidData("duplicate barcode code %q (rows %d and %d)", code, first, i+1)
-		}
-		seen[code] = i + 1
-		data.Codes[i] = code
+	if err := cleanUnitCodes(data.Codes, qty, "barcode code"); err != nil {
+		return "", err
 	}
 	return marshalNormalized(data)
+}
+
+func validateSerialData(qty int, raw string) (string, error) {
+	var data serialData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return "", invalidData("serials must be a list of serial numbers (text)")
+	}
+	if err := cleanUnitCodes(data.Serials, qty, "serial number"); err != nil {
+		return "", err
+	}
+	return marshalNormalized(data)
+}
+
+// cleanUnitCodes checks one code per unit (barcode codes, serial numbers): the
+// right count, none empty, none repeated. It trims the codes in place. what
+// names the kind of code in the messages.
+func cleanUnitCodes(codes []string, qty int, what string) error {
+	if len(codes) != qty {
+		return invalidData("expected %d %ss, got %d", qty, what, len(codes))
+	}
+	seen := make(map[string]int, qty)
+	for i, code := range codes {
+		code = strings.TrimSpace(code)
+		if code == "" {
+			return invalidData("%s %d of %d is empty", what, i+1, qty)
+		}
+		if first, dup := seen[code]; dup {
+			return invalidData("duplicate %s %q (rows %d and %d)", what, code, first, i+1)
+		}
+		seen[code] = i + 1
+		codes[i] = code
+	}
+	return nil
 }
 
 func isFourDigitYear(s string) bool {

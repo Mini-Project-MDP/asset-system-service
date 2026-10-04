@@ -40,6 +40,7 @@ func validInput() domain.CreateRequestInput {
 		Category: "Barcode", Distributor: "PT Utama", Outlet: "Bandung Kota", SalesDivision: "M1 BIS",
 		RequesterRole: "SA", RequesterName: "Laras P.", Qty: 3, Priority: "normal",
 		CreatedBy: "u-submitter",
+		Breakdown: []domain.QuantityBreakdownItem{{Kind: "Rusak", Quantity: 2}, {Kind: "Hilang", Quantity: 1}},
 	}
 }
 
@@ -317,7 +318,7 @@ func TestFormOptions(t *testing.T) {
 		if len(got.Outlets) != 4 || len(got.SalesDivisions) != 2 {
 			t.Errorf("outlets %d, sales divisions %d; want 4 and 2", len(got.Outlets), len(got.SalesDivisions))
 		}
-		if strings.Join(got.Categories, ",") != "Barcode,Android,Server" || strings.Join(got.RequestTypes, ",") != "Baru,Peremajaan" || strings.Join(got.Priorities, ",") != "normal,high,urgent" {
+		if strings.Join(got.Categories, ",") != "Barcode,Android,Server,Mobile Printer" || strings.Join(got.RequestTypes, ",") != "Baru,Peremajaan" || strings.Join(got.Priorities, ",") != "normal,high,urgent" {
 			t.Errorf("categories %v, request types %v, priorities %v", got.Categories, got.RequestTypes, got.Priorities)
 		}
 	})
@@ -352,6 +353,155 @@ func TestFormOptions(t *testing.T) {
 		svc := NewRequestService(&fakeRequestRepository{}, &fakeApprovalEngineClient{}, WithFormSource(fakeFormSource{err: boom}))
 		if _, err := svc.FormOptions(ctx); !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want the master data error", err)
+		}
+	})
+}
+
+func barcodeWith(items ...domain.QuantityBreakdownItem) domain.CreateRequestInput {
+	in := validInput()
+	in.Breakdown = items
+	total := 0
+	for _, i := range items {
+		total += i.Quantity
+	}
+	in.Qty = total
+	return in
+}
+
+func TestBarcodeBreakdown(t *testing.T) {
+	ctx := context.Background()
+	kind := func(k string, q int) domain.QuantityBreakdownItem {
+		return domain.QuantityBreakdownItem{Kind: k, Quantity: q}
+	}
+
+	t.Run("the total is the sum of the kinds, and zero counts are not stored", func(t *testing.T) {
+		svc, repo, _ := formService(t)
+		in := barcodeWith(kind("Rusak", 2), kind("Hilang", 0), kind("Buffer Stock", 3))
+		if _, err := svc.Create(ctx, in); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		got := repo.createdInput
+		if got.Qty != 5 || len(got.Breakdown) != 2 || got.Breakdown[0].Kind != "Rusak" || got.Breakdown[1].Kind != "Buffer Stock" {
+			t.Fatalf("stored qty %d, breakdown %+v; want 5 with Rusak and Buffer Stock only", got.Qty, got.Breakdown)
+		}
+	})
+
+	t.Run("kind names are matched ignoring case and stored as the document spells them", func(t *testing.T) {
+		svc, repo, _ := formService(t)
+		if _, err := svc.Create(ctx, barcodeWith(kind(" noo ", 1), kind("buffer stock", 1))); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if repo.createdInput.Breakdown[0].Kind != "NOO" || repo.createdInput.Breakdown[1].Kind != "Buffer Stock" {
+			t.Fatalf("breakdown = %+v", repo.createdInput.Breakdown)
+		}
+	})
+
+	rejected := []struct {
+		name  string
+		in    domain.CreateRequestInput
+		field string
+	}{
+		{"no breakdown at all", func() domain.CreateRequestInput { in := validInput(); in.Breakdown = nil; return in }(), "breakdown"},
+		{"every count zero", barcodeWith(kind("Rusak", 0), kind("Hilang", 0)), "breakdown"},
+		{"an unknown kind", barcodeWith(kind("Curian", 2)), "breakdown"},
+		{"a negative count", func() domain.CreateRequestInput {
+			in := barcodeWith(kind("Rusak", 3))
+			in.Breakdown[0].Quantity = -1
+			return in
+		}(), "breakdown"},
+		{"the same kind twice", barcodeWith(kind("Rusak", 1), kind("rusak", 1)), "breakdown"},
+		{"a total that is not the sum", func() domain.CreateRequestInput {
+			in := barcodeWith(kind("Rusak", 2), kind("Hilang", 2))
+			in.Qty = 9
+			return in
+		}(), "qty"},
+	}
+	for _, c := range rejected {
+		t.Run("rejects: "+c.name, func(t *testing.T) {
+			svc, repo, _ := formService(t)
+			_, err := svc.Create(ctx, c.in)
+			if got := fieldOf(t, err); got != c.field {
+				t.Fatalf("field = %q, want %q (err: %v)", got, c.field, err)
+			}
+			if repo.createdInput.Category != "" {
+				t.Fatal("nothing may be stored")
+			}
+		})
+	}
+
+	t.Run("other categories take a plain quantity and drop any breakdown", func(t *testing.T) {
+		svc, repo, _ := formService(t)
+		in := validInput()
+		in.Category, in.RequesterRole, in.ReqType = "Android", "Cabang", "Baru"
+		in.Breakdown = []domain.QuantityBreakdownItem{kind("Rusak", 1)}
+		if _, err := svc.Create(ctx, in); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if repo.createdInput.Qty != 3 || len(repo.createdInput.Breakdown) != 0 {
+			t.Fatalf("qty %d, breakdown %+v; want 3 and none", repo.createdInput.Qty, repo.createdInput.Breakdown)
+		}
+	})
+
+	t.Run("the form offers the four kinds", func(t *testing.T) {
+		svc, _, _ := formService(t)
+		got, _ := svc.FormOptions(ctx)
+		if strings.Join(got.BarcodeKinds, ",") != "Rusak,Hilang,NOO,Buffer Stock" {
+			t.Fatalf("kinds = %v", got.BarcodeKinds)
+		}
+	})
+}
+
+func TestMobilePrinter(t *testing.T) {
+	ctx := context.Background()
+	printer := func() domain.CreateRequestInput {
+		in := validInput()
+		in.Category, in.RequesterRole = "Mobile Printer", "Cabang"
+		return in
+	}
+
+	t.Run("it is a fourth category, requested by a branch or the Sales Director like Server", func(t *testing.T) {
+		svc, _, _ := formService(t)
+		got, _ := svc.FormOptions(ctx)
+		if strings.Join(got.Categories, ",") != "Barcode,Android,Server,Mobile Printer" {
+			t.Fatalf("categories = %v", got.Categories)
+		}
+		var roles []string
+		for _, r := range got.RequesterRoles["Mobile Printer"] {
+			roles = append(roles, r.Code)
+		}
+		if strings.Join(roles, ",") != "Cabang,SD" {
+			t.Fatalf("roles = %v", roles)
+		}
+	})
+
+	t.Run("a new request needs no request type, and any type sent is dropped", func(t *testing.T) {
+		svc, repo, _ := formService(t)
+		in := printer()
+		in.ReqType = "Peremajaan" // there is no replacement for a Mobile Printer
+		if _, err := svc.Create(ctx, in); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if repo.createdInput.ReqType != "" {
+			t.Fatalf("request type = %q, want none", repo.createdInput.ReqType)
+		}
+	})
+
+	t.Run("a sales level cannot request it", func(t *testing.T) {
+		svc, _, _ := formService(t)
+		in := printer()
+		in.RequesterRole = "SS"
+		if got := fieldOf(t, func() error { _, err := svc.Create(ctx, in); return err }()); got != "requesterRole" {
+			t.Fatalf("field = %q", got)
+		}
+	})
+
+	t.Run("it follows the same Approval Engine workflow as Server", func(t *testing.T) {
+		svc, _, engine := formService(t)
+		if _, err := svc.Create(ctx, printer()); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(engine.createCalls) != 1 || engine.createCalls[0].DocType != "asset_request_field_device" {
+			t.Fatalf("engine calls = %+v, want one with doc_type asset_request_field_device", engine.createCalls)
 		}
 	})
 }

@@ -132,6 +132,8 @@ func foldMonths(counts []domain.CategoryMonthCount, n int) []domain.MonthlyReque
 			m.Android += c.Count
 		case "Server":
 			m.Server += c.Count
+		case "Mobile Printer":
+			m.MobilePrinter += c.Count
 		}
 	}
 	return months

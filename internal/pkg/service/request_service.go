@@ -165,12 +165,14 @@ func (s *requestService) Create(ctx context.Context, input domain.CreateRequestI
 // workflow doc_type that governs it. Two doc_types, not one per category,
 // because a single WorkflowStep only supports one condition — see
 // docs/approval-engine-integration-plan.md Fase 0 for why Android and Server
-// (identical hierarchy) share a doc_type while Barcode gets its own.
+// (identical hierarchy) share a doc_type while Barcode gets its own. Mobile
+// Printer joins them too: the business has not fixed its hierarchy yet, and
+// the document's interim recommendation is to treat it like Server.
 func approvalEngineDocType(category string) string {
 	switch category {
 	case "Barcode":
 		return "asset_request_barcode"
-	case "Android", "Server":
+	case "Android", "Server", domain.CategoryMobilePrinter:
 		return "asset_request_field_device"
 	default:
 		return ""

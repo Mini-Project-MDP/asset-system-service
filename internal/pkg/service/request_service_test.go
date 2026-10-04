@@ -375,6 +375,7 @@ func TestRequestService_Create(t *testing.T) {
 			RequesterRole: "SA",
 			RequesterName: "Laras P.",
 			Qty:           2,
+			Breakdown:     []domain.QuantityBreakdownItem{{Kind: "Rusak", Quantity: 2}},
 			Priority:      "high",
 		})
 		if err != nil {
@@ -438,6 +439,7 @@ func TestRequestService_Create(t *testing.T) {
 			RequesterRole: "SA",
 			RequesterName: "Laras P.",
 			Qty:           2,
+			Breakdown:     []domain.QuantityBreakdownItem{{Kind: "Rusak", Quantity: 2}},
 			Priority:      "high",
 		})
 		if err != nil {
@@ -487,6 +489,7 @@ func TestRequestService_Create(t *testing.T) {
 			RequesterRole: "SA",
 			RequesterName: "Laras P.",
 			Qty:           2,
+			Breakdown:     []domain.QuantityBreakdownItem{{Kind: "Rusak", Quantity: 2}},
 			Priority:      "high",
 		})
 		if err != nil {

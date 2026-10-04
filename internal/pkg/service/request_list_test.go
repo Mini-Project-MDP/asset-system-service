@@ -162,6 +162,7 @@ func TestCreateRecordsTheSubmitter(t *testing.T) {
 	svc := NewRequestService(repo, &fakeApprovalEngineClient{})
 	in := validInput()
 	in.Qty, in.CreatedBy = 1, "u-admin"
+	in.Breakdown = []domain.QuantityBreakdownItem{{Kind: "Rusak", Quantity: 1}}
 	_, err := svc.Create(context.Background(), in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

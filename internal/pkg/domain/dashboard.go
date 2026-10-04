@@ -29,10 +29,11 @@ type CategoryMonthCount struct {
 
 // MonthlyRequestCount is one month on the chart, split by category.
 type MonthlyRequestCount struct {
-	Month   int // 1-12
-	Barcode int
-	Android int
-	Server  int
+	Month         int // 1-12
+	Barcode       int
+	MobilePrinter int
+	Android       int
+	Server        int
 }
 
 // ActivityRecord is a raw request_history event.

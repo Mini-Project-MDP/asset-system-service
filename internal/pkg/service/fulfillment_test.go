@@ -48,7 +48,7 @@ func TestValidateFulfillmentData(t *testing.T) {
 		}{
 			{"not json", "Barcode", 1, `not json`, "JSON"},
 			{"not an object", "Barcode", 1, `["a"]`, "JSON"},
-			{"unknown category", "Mobile Printer", 1, `{"codes":["a"]}`, "category"},
+			{"unknown category", "Hologram", 1, `{"codes":["a"]}`, "category"},
 			{"barcode too few", "Barcode", 3, `{"codes":["a","b"]}`, "3"},
 			{"barcode too many", "Barcode", 1, `{"codes":["a","b"]}`, "1"},
 			{"barcode blank code", "Barcode", 2, `{"codes":["a","  "]}`, "2"},
@@ -231,6 +231,46 @@ func TestAdvanceFulfillment(t *testing.T) {
 		svc := NewRequestService(fulfillmentRepo(domain.RequestStatusCompleted, intPtr(3), "Barcode", 1), &fakeApprovalEngineClient{})
 		if _, err := svc.AdvanceFulfillment(ctx, "REQ-1", "EMP1"); !errors.Is(err, ErrFulfillmentNotReady) {
 			t.Fatalf("err = %v, want ErrFulfillmentNotReady", err)
+		}
+	})
+}
+
+func TestMobilePrinterFulfillmentData(t *testing.T) {
+	t.Run("one serial number per unit, trimmed", func(t *testing.T) {
+		got, err := validateFulfillmentData("Mobile Printer", 2, `{"serials":[" SN-1 ","SN-2"]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != `{"serials":["SN-1","SN-2"]}` {
+			t.Fatalf("got %s", got)
+		}
+	})
+
+	cases := []struct {
+		name, raw, wantMsg string
+		qty                int
+	}{
+		{"too few serials", `{"serials":["SN-1"]}`, "2", 2},
+		{"too many serials", `{"serials":["SN-1","SN-2"]}`, "1", 1},
+		{"a blank serial", `{"serials":["SN-1","  "]}`, "2", 2},
+		{"a duplicate serial", `{"serials":["SN-1","SN-1"]}`, "duplicate", 2},
+		{"the Barcode shape is not accepted", `{"codes":["A","B"]}`, "2", 2},
+		{"serials that are not text", `{"serials":[1,2]}`, "serial", 2},
+	}
+	for _, c := range cases {
+		_, err := validateFulfillmentData("Mobile Printer", c.qty, c.raw)
+		if !errors.Is(err, ErrFulfillmentDataInvalid) {
+			t.Errorf("%s: err = %v, want ErrFulfillmentDataInvalid", c.name, err)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.wantMsg) {
+			t.Errorf("%s: message %q should mention %q", c.name, err.Error(), c.wantMsg)
+		}
+	}
+
+	t.Run("Barcode still wants codes", func(t *testing.T) {
+		if _, err := validateFulfillmentData("Barcode", 1, `{"serials":["SN-1"]}`); !errors.Is(err, ErrFulfillmentDataInvalid) {
+			t.Fatalf("err = %v, want ErrFulfillmentDataInvalid", err)
 		}
 	})
 }

@@ -44,6 +44,12 @@ func (h *RequestHandler) viewerOf(c fiber.Ctx) (viewer domain.Viewer, ok bool, e
 	return viewer, true, nil
 }
 
+// breakdownBody is how many units of a Barcode request are for one Tipe Pengajuan.
+type breakdownBody struct {
+	Type string `json:"type"`
+	Qty  int    `json:"qty"`
+}
+
 type createRequestBody struct {
 	Category    string `json:"category"`
 	Outlet      string `json:"outlet"`
@@ -55,7 +61,9 @@ type createRequestBody struct {
 	RequesterRole     string `json:"requesterRole"`
 	RequesterName     string `json:"requesterName"`
 	Qty               int    `json:"qty"`
-	Priority          string `json:"priority"`
+	// Breakdown is required for Barcode requests, and qty must be its total.
+	Breakdown []breakdownBody `json:"breakdown"`
+	Priority  string          `json:"priority"`
 	// RevisedFromID: set when this request resubmits one that was sent back
 	// for revision (see docs/approval-engine-integration-plan.md Fase 0).
 	RevisedFromID *string `json:"revisedFromId,omitempty"`
@@ -169,6 +177,11 @@ func (h *RequestHandler) Create(c fiber.Ctx) error {
 		return err
 	}
 
+	breakdown := make([]domain.QuantityBreakdownItem, 0, len(body.Breakdown))
+	for _, b := range body.Breakdown {
+		breakdown = append(breakdown, domain.QuantityBreakdownItem{Kind: b.Type, Quantity: b.Qty})
+	}
+
 	item, err := h.service.Create(c.Context(), domain.CreateRequestInput{
 		CreatedBy:         viewer.UserID,
 		Category:          body.Category,
@@ -180,6 +193,7 @@ func (h *RequestHandler) Create(c fiber.Ctx) error {
 		RequesterRole:     body.RequesterRole,
 		RequesterName:     body.RequesterName,
 		Qty:               body.Qty,
+		Breakdown:         breakdown,
 		Priority:          body.Priority,
 		RevisedFromID:     body.RevisedFromID,
 	})
