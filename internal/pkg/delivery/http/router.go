@@ -27,6 +27,7 @@ type Handlers struct {
 	User         *handler.UserHandler
 	Request      *handler.RequestHandler
 	Dashboard    *handler.DashboardHandler
+	Navigation   *handler.NavigationHandler
 	MasterData   *handler.MasterDataHandler
 	PhoneCatalog *handler.PhoneCatalogHandler
 	Imei         *handler.ImeiHandler
@@ -106,11 +107,13 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 		// Registered before the /fulfillment/:id routes so "phone-catalog" is not read as an id.
 		if deps.Handlers.PhoneCatalog != nil {
 			protected.Get("/fulfillment/phone-catalog", guard.Require("fulfillment:read"), deps.Handlers.PhoneCatalog.Catalog)
-			catalog := protected.Group("/settings", guard.Require("settings:manage"))
-			catalog.Post("/phone-brands", deps.Handlers.PhoneCatalog.CreateBrand)
-			catalog.Put("/phone-brands/:id", deps.Handlers.PhoneCatalog.UpdateBrand)
-			catalog.Post("/phone-models", deps.Handlers.PhoneCatalog.CreateModel)
-			catalog.Put("/phone-models/:id", deps.Handlers.PhoneCatalog.UpdateModel)
+			// Per-route guards: a group-level guard on "/settings" would apply to every
+			// route under it, whichever group declared it.
+			manage := guard.Require("settings:manage")
+			protected.Post("/settings/phone-brands", manage, deps.Handlers.PhoneCatalog.CreateBrand)
+			protected.Put("/settings/phone-brands/:id", manage, deps.Handlers.PhoneCatalog.UpdateBrand)
+			protected.Post("/settings/phone-models", manage, deps.Handlers.PhoneCatalog.CreateModel)
+			protected.Put("/settings/phone-models/:id", manage, deps.Handlers.PhoneCatalog.UpdateModel)
 		}
 		if deps.Handlers.Imei != nil {
 			protected.Get("/fulfillment/imei-lookup/:imei", guard.Require("fulfillment:read"), deps.Handlers.Imei.Lookup)
@@ -120,7 +123,7 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 			requests.Get("/", deps.Handlers.Request.List)
 			requests.Get("/:id", deps.Handlers.Request.Detail)
 			requests.Post("/", guard.Require("request:create"), deps.Handlers.Request.Create)
-			approvals := protected.Group("/approvals", guard.Require("request:read"))
+			approvals := protected.Group("/approvals", guard.Require("approvals:read"))
 			approvals.Get("/", deps.Handlers.Request.Approvals)
 			approvals.Get("/:id", deps.Handlers.Request.ApprovalDetail)
 			approvals.Post("/:id/action", guard.Require("request:approve"), deps.Handlers.Request.ApprovalAction)
@@ -130,20 +133,27 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 			fulfillment.Post("/:id/data", guard.Require("fulfillment:process"), deps.Handlers.Request.SaveFulfillmentData)
 			fulfillment.Post("/:id/advance", guard.Require("fulfillment:process"), deps.Handlers.Request.AdvanceFulfillment)
 		}
+		if deps.Handlers.Navigation != nil {
+			// Any signed-in user may ask; the answer only holds the counters of modules they can open.
+			protected.Get("/navigation/badges", deps.Handlers.Navigation.Badges)
+		}
 		if deps.Handlers.Dashboard != nil {
 			protected.Get("/dashboard/overview", guard.Require("dashboard:read"), deps.Handlers.Dashboard.Overview)
 		}
 		if deps.Handlers.MasterData != nil {
-			settings := protected.Group("/settings", guard.Require("settings:manage"))
-			settings.Get("/outlets", deps.Handlers.MasterData.Outlets)
-			settings.Post("/outlets", deps.Handlers.MasterData.CreateOutlet)
-			settings.Put("/outlets/:id", deps.Handlers.MasterData.UpdateOutlet)
-			settings.Get("/distributors", deps.Handlers.MasterData.Distributors)
-			settings.Post("/distributors", deps.Handlers.MasterData.CreateDistributor)
-			settings.Put("/distributors/:id", deps.Handlers.MasterData.UpdateDistributor)
-			settings.Get("/types", deps.Handlers.MasterData.Types)
-			settings.Post("/types", deps.Handlers.MasterData.CreateType)
-			settings.Put("/types/:id", deps.Handlers.MasterData.UpdateType)
+			// Outlets and distributors: Admin and Asset Team. Asset types: Admin only
+			// (access matrix of the requirement document).
+			masterData := guard.Require("masterdata:manage")
+			manage := guard.Require("settings:manage")
+			protected.Get("/settings/outlets", masterData, deps.Handlers.MasterData.Outlets)
+			protected.Post("/settings/outlets", masterData, deps.Handlers.MasterData.CreateOutlet)
+			protected.Put("/settings/outlets/:id", masterData, deps.Handlers.MasterData.UpdateOutlet)
+			protected.Get("/settings/distributors", masterData, deps.Handlers.MasterData.Distributors)
+			protected.Post("/settings/distributors", masterData, deps.Handlers.MasterData.CreateDistributor)
+			protected.Put("/settings/distributors/:id", masterData, deps.Handlers.MasterData.UpdateDistributor)
+			protected.Get("/settings/types", manage, deps.Handlers.MasterData.Types)
+			protected.Post("/settings/types", manage, deps.Handlers.MasterData.CreateType)
+			protected.Put("/settings/types/:id", manage, deps.Handlers.MasterData.UpdateType)
 		}
 
 		if deps.Handlers.Auth != nil {

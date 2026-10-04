@@ -289,7 +289,9 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 	('perm_ful_read', 'fulfillment:read', 'Read Fulfillment', 'View fulfillment statuses'),
 	('perm_set_manage', 'settings:manage', 'Manage Settings', 'Update system and application settings'),
 	('perm_dash_read', 'dashboard:read', 'Read Dashboard', 'View the dashboard overview (Admin and Asset Team)'),
-	('perm_req_read_all', 'request:read_all', 'Read All Requests', 'See every request, not only the ones you submitted (Admin and Asset Team)')
+	('perm_req_read_all', 'request:read_all', 'Read All Requests', 'See every request, not only the ones you submitted (Admin and Asset Team)'),
+	('perm_appr_read', 'approvals:read', 'Read Approvals', 'Open the Approvals module: the queue and the requests in it (Admin and approvers)'),
+	('perm_masterdata', 'masterdata:manage', 'Manage Master Data', 'Create and edit outlets and distributors (Admin and Asset Team)')
 	ON CONFLICT (id) DO NOTHING;
 
 	INSERT INTO asset_types (id, code, name, identifier_type, identifier_required) VALUES
@@ -320,22 +322,23 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 	('role_master', 'perm_req_create'), ('role_master', 'perm_req_read'), ('role_master', 'perm_req_approve'),
 	('role_master', 'perm_ful_process'), ('role_master', 'perm_ful_read'),
 	('role_master', 'perm_set_manage'), ('role_master', 'perm_dash_read'), ('role_master', 'perm_req_read_all'),
+	('role_master', 'perm_appr_read'), ('role_master', 'perm_masterdata'),
 	('role_mgr', 'perm_u_read'), ('role_mgr', 'perm_a_read'), ('role_mgr', 'perm_a_write'),
 	('role_mgr', 'perm_req_create'), ('role_mgr', 'perm_req_read'), ('role_mgr', 'perm_req_approve'),
 	('role_mgr', 'perm_ful_process'), ('role_mgr', 'perm_ful_read'), ('role_mgr', 'perm_dash_read'), ('role_mgr', 'perm_req_read_all'),
+	('role_mgr', 'perm_masterdata'),
 	('role_appr', 'perm_u_read'), ('role_appr', 'perm_a_read'),
-	('role_appr', 'perm_req_create'), ('role_appr', 'perm_req_read'), ('role_appr', 'perm_req_approve'),
+	('role_appr', 'perm_req_create'), ('role_appr', 'perm_req_read'), ('role_appr', 'perm_req_approve'), ('role_appr', 'perm_appr_read'),
 	('role_staff', 'perm_u_read'), ('role_staff', 'perm_a_read'),
 	('role_staff', 'perm_ful_process'), ('role_staff', 'perm_ful_read'),
 	('role_user', 'perm_u_read'), ('role_user', 'perm_a_read'),
 	('role_user', 'perm_req_create'), ('role_user', 'perm_req_read'),
 	('role_sa', 'perm_req_create'), ('role_sa', 'perm_req_read'),
-	('role_ss', 'perm_req_create'), ('role_ss', 'perm_req_read'), ('role_ss', 'perm_req_approve'),
-	('role_rsm', 'perm_req_create'), ('role_rsm', 'perm_req_read'), ('role_rsm', 'perm_req_approve'),
-	('role_grsm', 'perm_req_create'), ('role_grsm', 'perm_req_read'), ('role_grsm', 'perm_req_approve'),
-	('role_nsm', 'perm_req_create'), ('role_nsm', 'perm_req_read'), ('role_nsm', 'perm_req_approve'),
-	('role_sd', 'perm_req_create'), ('role_sd', 'perm_req_read'), ('role_sd', 'perm_req_approve'),
-	('role_cabang', 'perm_req_create'), ('role_cabang', 'perm_req_read')
+	('role_ss', 'perm_req_approve'), ('role_ss', 'perm_appr_read'),
+	('role_rsm', 'perm_req_approve'), ('role_rsm', 'perm_appr_read'),
+	('role_grsm', 'perm_req_approve'), ('role_grsm', 'perm_appr_read'),
+	('role_nsm', 'perm_req_approve'), ('role_nsm', 'perm_appr_read'),
+	('role_sd', 'perm_req_approve'), ('role_sd', 'perm_appr_read')
 	ON CONFLICT (role_id, permission_id) DO NOTHING;
 	`
 

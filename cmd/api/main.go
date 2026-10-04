@@ -79,6 +79,7 @@ func run() error {
 	phoneCatalogService := service.NewPhoneCatalogService(repository.NewPhoneCatalogRepository(databaseConnection))
 	imeiService := service.NewImeiService(repository.NewImeiReferenceRepository(databaseConnection))
 	dashboardService := service.NewDashboardService(repository.NewDashboardRepository(databaseConnection), time.Now)
+	navigationService := service.NewNavigationService(repository.NewNavigationRepository(databaseConnection), authRepo)
 
 	fiberApp := http.NewRouter(http.Dependencies{
 		Database:             databaseConnection,
@@ -91,6 +92,7 @@ func run() error {
 			User:         userHandler,
 			Request:      handler.NewRequestHandler(requestService, permissionResolver),
 			Dashboard:    handler.NewDashboardHandler(dashboardService),
+			Navigation:   handler.NewNavigationHandler(navigationService, permissionResolver),
 			MasterData:   handler.NewMasterDataHandler(masterDataService),
 			PhoneCatalog: handler.NewPhoneCatalogHandler(phoneCatalogService),
 			Imei:         handler.NewImeiHandler(imeiService),

@@ -64,6 +64,7 @@ func initialize() error {
 	phoneCatalogService := service.NewPhoneCatalogService(repository.NewPhoneCatalogRepository(databaseConnection))
 	imeiService := service.NewImeiService(repository.NewImeiReferenceRepository(databaseConnection))
 	dashboardService := service.NewDashboardService(repository.NewDashboardRepository(databaseConnection), time.Now)
+	navigationService := service.NewNavigationService(repository.NewNavigationRepository(databaseConnection), authRepo)
 
 	fiberApp := appHttp.NewRouter(appHttp.Dependencies{
 		Database:             db,
@@ -77,6 +78,7 @@ func initialize() error {
 			User:         userHandlerInstance,
 			Request:      appHandler.NewRequestHandler(requestService, permissionResolver),
 			Dashboard:    appHandler.NewDashboardHandler(dashboardService),
+			Navigation:   appHandler.NewNavigationHandler(navigationService, permissionResolver),
 			MasterData:   appHandler.NewMasterDataHandler(masterDataService),
 			PhoneCatalog: appHandler.NewPhoneCatalogHandler(phoneCatalogService),
 			Imei:         appHandler.NewImeiHandler(imeiService),
