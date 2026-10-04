@@ -119,6 +119,8 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 			protected.Get("/fulfillment/imei-lookup/:imei", guard.Require("fulfillment:read"), deps.Handlers.Imei.Lookup)
 		}
 		if deps.Handlers.Request != nil {
+			// Registered before the /requests group, whose /:id route would otherwise take "form-options" for an id.
+			protected.Get("/requests/form-options", guard.Require("request:create"), deps.Handlers.Request.FormOptions)
 			requests := protected.Group("/requests", guard.Require("request:read"))
 			requests.Get("/", deps.Handlers.Request.List)
 			requests.Get("/:id", deps.Handlers.Request.Detail)

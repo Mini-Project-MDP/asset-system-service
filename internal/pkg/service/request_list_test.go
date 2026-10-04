@@ -160,9 +160,9 @@ func TestCreateRecordsTheSubmitter(t *testing.T) {
 		requesters: map[string]domain.RequesterInfo{"Laras P.": {UserID: "u-laras", EmployeeNo: "E1"}},
 	}
 	svc := NewRequestService(repo, &fakeApprovalEngineClient{})
-	_, err := svc.Create(context.Background(), domain.CreateRequestInput{
-		Category: "Barcode", Qty: 1, RequesterName: "Laras P.", CreatedBy: "u-admin",
-	})
+	in := validInput()
+	in.Qty, in.CreatedBy = 1, "u-admin"
+	_, err := svc.Create(context.Background(), in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

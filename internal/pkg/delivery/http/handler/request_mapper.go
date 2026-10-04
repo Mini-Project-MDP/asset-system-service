@@ -115,7 +115,7 @@ func mapRequest(r domain.AssetRequest) fiber.Map {
 		"salesDivision":   r.SalesDivision,
 		"reqType":         r.RequestType,
 		"by":              r.RequesterName,
-		"byRole":          "Requester",
+		"byRole":          requesterRoleOrDefault(r.RequesterRole),
 		"date":            r.CreatedAt,
 		"step":            r.CurrentStep,
 		"chain":           chain,
@@ -127,4 +127,45 @@ func mapRequest(r domain.AssetRequest) fiber.Map {
 		"approvalStatus":  r.ApprovalStatus,
 		"currentStepName": r.CurrentStepName,
 	}
+}
+
+// mapFormOptions builds the JSON the New Request form reads.
+func mapFormOptions(o domain.RequestFormOptions) fiber.Map {
+	refs := func(list []domain.OutletRef) []fiber.Map {
+		out := make([]fiber.Map, 0, len(list))
+		for _, r := range list {
+			out = append(out, fiber.Map{"id": r.ID, "name": r.Name})
+		}
+		return out
+	}
+	distributors := make([]fiber.Map, 0, len(o.Distributors))
+	for _, d := range o.Distributors {
+		distributors = append(distributors, fiber.Map{"id": d.ID, "name": d.Name, "outlets": refs(d.Outlets)})
+	}
+	roles := make(fiber.Map, len(o.RequesterRoles))
+	for category, options := range o.RequesterRoles {
+		list := make([]fiber.Map, 0, len(options))
+		for _, r := range options {
+			list = append(list, fiber.Map{"code": r.Code, "label": r.Label})
+		}
+		roles[category] = list
+	}
+	return fiber.Map{
+		"categories":     o.Categories,
+		"distributors":   distributors,
+		"outlets":        refs(o.Outlets),
+		"salesDivisions": o.SalesDivisions,
+		"requestTypes":   o.RequestTypes,
+		"priorities":     o.Priorities,
+		"requesterRoles": roles,
+	}
+}
+
+// requesterRoleOrDefault is the role stored with the request; requests made
+// before roles were stored show the generic "Requester".
+func requesterRoleOrDefault(role string) string {
+	if role == "" {
+		return "Requester"
+	}
+	return role
 }

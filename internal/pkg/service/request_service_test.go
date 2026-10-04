@@ -29,6 +29,12 @@ type fakeRequestRepository struct {
 	history map[string][]domain.ApprovalHistoryItem
 
 	lastListQuery domain.RequestListQuery
+
+	// usersByID backs ResolveRequesterByUserID.
+	usersByID map[string]domain.RequesterInfo
+	// what Create received, to check validation and identity decisions.
+	createdInput     domain.CreateRequestInput
+	createdRequester string
 }
 
 // List mirrors the real repository's filtering: a substring match on id,
@@ -108,7 +114,16 @@ func (f *fakeRequestRepository) ResolveRequester(ctx context.Context, nameOrEmai
 	return &info, nil
 }
 
+func (f *fakeRequestRepository) ResolveRequesterByUserID(ctx context.Context, userID string) (*domain.RequesterInfo, error) {
+	info, ok := f.usersByID[userID]
+	if !ok {
+		return nil, nil
+	}
+	return &info, nil
+}
+
 func (f *fakeRequestRepository) Create(ctx context.Context, requesterID string, input domain.CreateRequestInput) (string, error) {
+	f.createdInput, f.createdRequester = input, requesterID
 	if f.createErr != nil {
 		return "", f.createErr
 	}
@@ -354,6 +369,10 @@ func TestRequestService_Create(t *testing.T) {
 
 		got, err := svc.Create(context.Background(), domain.CreateRequestInput{
 			Category:      "Barcode",
+			Distributor:   "PT Utama",
+			Outlet:        "Bandung Kota",
+			SalesDivision: "M1 BIS",
+			RequesterRole: "SA",
 			RequesterName: "Laras P.",
 			Qty:           2,
 			Priority:      "high",
@@ -388,11 +407,9 @@ func TestRequestService_Create(t *testing.T) {
 		repo := &fakeRequestRepository{requesters: map[string]domain.RequesterInfo{}}
 		svc := NewRequestService(repo, &fakeApprovalEngineClient{})
 
-		_, err := svc.Create(context.Background(), domain.CreateRequestInput{
-			Category:      "Barcode",
-			RequesterName: "Unknown Person",
-			Qty:           1,
-		})
+		in := validInput()
+		in.RequesterName, in.CreatedBy = "Unknown Person", ""
+		_, err := svc.Create(context.Background(), in)
 		if !errors.Is(err, ErrRequesterNotFound) {
 			t.Fatalf("expected ErrRequesterNotFound, got %v", err)
 		}
@@ -415,6 +432,10 @@ func TestRequestService_Create(t *testing.T) {
 
 		got, err := svc.Create(context.Background(), domain.CreateRequestInput{
 			Category:      "Barcode",
+			Distributor:   "PT Utama",
+			Outlet:        "Bandung Kota",
+			SalesDivision: "M1 BIS",
+			RequesterRole: "SA",
 			RequesterName: "Laras P.",
 			Qty:           2,
 			Priority:      "high",
@@ -460,6 +481,10 @@ func TestRequestService_Create(t *testing.T) {
 
 		got, err := svc.Create(context.Background(), domain.CreateRequestInput{
 			Category:      "Barcode",
+			Distributor:   "PT Utama",
+			Outlet:        "Bandung Kota",
+			SalesDivision: "M1 BIS",
+			RequesterRole: "SA",
 			RequesterName: "Laras P.",
 			Qty:           2,
 			Priority:      "high",
@@ -478,42 +503,34 @@ func TestRequestService_Create(t *testing.T) {
 		}
 	})
 
-	t.Run("unmapped category marks sync pending without calling the engine", func(t *testing.T) {
-		repo := &fakeRequestRepository{
-			requesters: map[string]domain.RequesterInfo{
-				"Laras P.": {UserID: "usr_1", EmployeeNo: "EMP101", ApprovalRank: 10},
-			},
-			nextID: "REQ-NEW1",
-		}
+	t.Run("an unknown category is rejected before anything is stored", func(t *testing.T) {
+		repo := &fakeRequestRepository{nextID: "REQ-NEW1"}
 		engine := &fakeApprovalEngineClient{}
 		svc := NewRequestService(repo, engine)
 
-		got, err := svc.Create(context.Background(), domain.CreateRequestInput{
-			Category:      "SomeUnknownCategory",
-			RequesterName: "Laras P.",
-			Qty:           1,
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		in := validInput()
+		in.Category = "SomeUnknownCategory"
+		if _, err := svc.Create(context.Background(), in); !errors.Is(err, ErrInvalidRequestPayload) {
+			t.Fatalf("expected ErrInvalidRequestPayload, got %v", err)
 		}
-		if len(engine.createCalls) != 0 {
-			t.Fatalf("expected engine not to be called for an unmapped category, got %d calls", len(engine.createCalls))
-		}
-		if got.ApprovalStatus != domain.ApprovalSyncPending {
-			t.Fatalf("expected approval_status PENDING_ENGINE_SYNC, got %s", got.ApprovalStatus)
+		if len(engine.createCalls) != 0 || len(repo.items) != 0 {
+			t.Fatalf("nothing may be stored or sent: %d engine calls, %d rows", len(engine.createCalls), len(repo.items))
 		}
 	})
 }
 
 func TestRequestService_RetryPendingApprovalSync(t *testing.T) {
 	repo := &fakeRequestRepository{
-		requesters: map[string]domain.RequesterInfo{
-			"Demo Sales Admin": {UserID: "usr_sa1", EmployeeNo: "EMP101", ApprovalRank: 10},
+		usersByID: map[string]domain.RequesterInfo{
+			"usr_sa1": {UserID: "usr_sa1", EmployeeNo: "EMP101", ApprovalRank: 10, Name: "Demo Sales Admin"},
 		},
 		items: []domain.AssetRequest{
-			{ID: "REQ-P1", Category: "Barcode", RequesterName: "Demo Sales Admin", ApprovalStatus: domain.ApprovalSyncPending},
-			{ID: "REQ-P2", Category: "Barcode", RequesterName: "Unknown Requester", ApprovalStatus: domain.ApprovalSyncPending},
-			{ID: "REQ-OK", Category: "Barcode", RequesterName: "Demo Sales Admin", ApprovalStatus: "pending"},
+			// The name typed on the form is free text; the stored user id is what identifies the requester.
+			{ID: "REQ-P1", Category: "Barcode", RequesterID: "usr_sa1", RequesterName: "Cabang Bandung", ApprovalStatus: domain.ApprovalSyncPending},
+			{ID: "REQ-P2", Category: "Barcode", RequesterID: "usr_gone", RequesterName: "Unknown Requester", ApprovalStatus: domain.ApprovalSyncPending},
+			{ID: "REQ-OK", Category: "Barcode", RequesterID: "usr_sa1", RequesterName: "Demo Sales Admin", ApprovalStatus: "pending"},
+			// A row whose category has no workflow stays pending without calling the engine.
+			{ID: "REQ-ODD", Category: "SomeUnknownCategory", RequesterID: "usr_sa1", ApprovalStatus: domain.ApprovalSyncPending},
 		},
 	}
 	engine := &fakeApprovalEngineClient{createResult: &domain.EngineApprovalRequest{ID: "eng-retry", Status: "pending", CurrentStepOrder: 1}}
@@ -526,8 +543,8 @@ func TestRequestService_RetryPendingApprovalSync(t *testing.T) {
 	if retried != 1 {
 		t.Fatalf("expected 1 successful retry (REQ-P1), got %d", retried)
 	}
-	if failed != 1 {
-		t.Fatalf("expected 1 failed retry (REQ-P2, unresolvable requester), got %d", failed)
+	if failed != 2 {
+		t.Fatalf("expected 2 failed retries (REQ-P2 unresolvable requester, REQ-ODD unmapped category), got %d", failed)
 	}
 	// REQ-OK was never PENDING_ENGINE_SYNC — must not be touched.
 	if len(engine.createCalls) != 1 || engine.createCalls[0].ResourceID != "REQ-P1" {

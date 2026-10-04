@@ -72,6 +72,8 @@ type AssetRequest struct {
 	// recorded). A user may see a request they submitted or are the requester of.
 	RequesterID string
 	CreatedBy   string
+	// RequesterRole is the role chosen on the form (SA, SS, ..., Cabang); empty for older requests.
+	RequesterRole string
 
 	Chain []ApprovalStepItem
 	Hist  []ApprovalHistoryItem
@@ -106,6 +108,8 @@ type RequesterInfo struct {
 	UserID       string
 	EmployeeNo   string
 	ApprovalRank int
+	Name         string
+	Email        string
 }
 
 // RequestFilter narrows RequestRepository.List results.
@@ -131,15 +135,21 @@ type RequestListQuery struct {
 
 // CreateRequestInput is the payload for creating a new asset request.
 type CreateRequestInput struct {
-	Category      string
-	Outlet        string
-	Distributor   string
-	SalesDivision string
-	ReqType       string
-	RequesterRole string
-	RequesterName string
-	Qty           int
-	Priority      string
+	Category    string
+	Outlet      string
+	Distributor string // name of a distributor in master data; empty when DistributorManual is used
+	// DistributorManual is a distributor typed in by hand ("Lainnya"); exclusive with Distributor.
+	DistributorManual string
+	SalesDivision     string
+	ReqType           string
+	RequesterRole     string
+	RequesterName     string
+	Qty               int
+	Priority          string
+	// DistributorID and OutletID are filled in by the service once the names
+	// above are matched against master data; the repository stores them.
+	DistributorID string
+	OutletID      string
 	// RevisedFromID links this request to the one it resubmits after a
 	// "revision" decision (see Fase 0 in approval-engine-integration-plan.md:
 	// revision = rejected + brand new request, not an in-place edit). Nil for
@@ -176,6 +186,8 @@ type RequestRepository interface {
 	// new request to its requester and to build the Approval Engine payload.
 	// Returns nil if no match is found.
 	ResolveRequester(ctx context.Context, nameOrEmail string) (*RequesterInfo, error)
+	// ResolveRequesterByUserID is ResolveRequester for a known user id; nil if there is no such user.
+	ResolveRequesterByUserID(ctx context.Context, userID string) (*RequesterInfo, error)
 	Create(ctx context.Context, requesterID string, input CreateRequestInput) (id string, err error)
 	// SaveFulfillmentData stores the (already validated, normalized JSON)
 	// asset data and moves the request from Processing to Shipped. It only
@@ -224,6 +236,8 @@ type RequestService interface {
 	// is not theirs is reported as not found, so its existence is not revealed.
 	DetailFor(ctx context.Context, id string, viewer Viewer) (*AssetRequest, error)
 	Create(ctx context.Context, input CreateRequestInput) (*AssetRequest, error)
+	// FormOptions returns what the New Request form offers.
+	FormOptions(ctx context.Context) (*RequestFormOptions, error)
 	ApprovalAction(ctx context.Context, id string, input ApprovalActionInput) (*AssetRequest, error)
 	// SaveFulfillmentData validates fulfillData (JSON) for the request's
 	// category, stores it and moves the request to Shipped. actor is the

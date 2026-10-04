@@ -73,9 +73,11 @@ func run() error {
 	userHandler := handler.NewUserHandler(authService, userService)
 
 	approvalEngineClient := approvalengine.New(applicationConfig.ApprovalEngineBaseURL, applicationConfig.ApprovalEngineAPIKey, nil)
+	masterDataRepo := repository.NewMasterDataRepository(databaseConnection)
 	requestRepo := repository.NewRequestRepository(databaseConnection)
-	requestService := service.NewRequestService(requestRepo, approvalEngineClient)
-	masterDataService := service.NewMasterDataService(repository.NewMasterDataRepository(databaseConnection))
+	requestService := service.NewRequestService(requestRepo, approvalEngineClient,
+		service.WithFormSource(repository.NewRequestFormSource(databaseConnection, masterDataRepo)))
+	masterDataService := service.NewMasterDataService(masterDataRepo)
 	phoneCatalogService := service.NewPhoneCatalogService(repository.NewPhoneCatalogRepository(databaseConnection))
 	imeiService := service.NewImeiService(repository.NewImeiReferenceRepository(databaseConnection))
 	dashboardService := service.NewDashboardService(repository.NewDashboardRepository(databaseConnection), time.Now)

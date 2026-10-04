@@ -28,11 +28,14 @@ func NewRequestRepository(db *sql.DB) domain.RequestRepository {
 // display, not comparison. See Milestone 7 in docs/backend-milestones.md
 // for how the mismatch surfaced (cmd/retrypendingsync round-tripping
 // through the DB, unlike the synchronous create path).
+// The distributor is the master data one, or the one typed in by hand; the
+// requester is the name typed on the form, or else the user the request is
+// attributed to (requests made before the name was stored).
 const requestSelectColumns = `
-	ar.id, at.code, o.name, ar.quantity, ar.priority, d.name, ar.sales_division,
-	ar.request_type, u.name, ar.created_at, ar.current_step, ar.fulfillment_step,
+	ar.id, at.code, o.name, ar.quantity, ar.priority, COALESCE(d.name, ar.distributor_manual), ar.sales_division,
+	ar.request_type, COALESCE(NULLIF(ar.requester_name, ''), u.name), ar.created_at, ar.current_step, ar.fulfillment_step,
 	ar.fulfillment_data, ar.status, ar.approval_request_id, ar.approval_status,
-	ar.current_step_name, ar.revised_from_id, ar.requester_id, ar.created_by
+	ar.current_step_name, ar.revised_from_id, ar.requester_id, ar.created_by, ar.requester_role
 `
 
 const requestSelectFrom = `
@@ -46,7 +49,7 @@ const requestSelectFrom = `
 func scanAssetRequest(scanner interface{ Scan(...any) error }) (domain.AssetRequest, error) {
 	var r domain.AssetRequest
 	var categoryNS, outletNS, distributorNS, reqTypeNS, fulfillDataNS sql.NullString
-	var approvalRequestIDNS, approvalStatusNS, currentStepNameNS, revisedFromIDNS, createdByNS sql.NullString
+	var approvalRequestIDNS, approvalStatusNS, currentStepNameNS, revisedFromIDNS, createdByNS, requesterRoleNS sql.NullString
 	var fulfill sql.NullInt64
 
 	if err := scanner.Scan(
@@ -54,7 +57,7 @@ func scanAssetRequest(scanner interface{ Scan(...any) error }) (domain.AssetRequ
 		&r.SalesDivision, &reqTypeNS, &r.RequesterName, &r.CreatedAt, &r.CurrentStep,
 		&fulfill, &fulfillDataNS, &r.Status,
 		&approvalRequestIDNS, &approvalStatusNS, &currentStepNameNS, &revisedFromIDNS,
-		&r.RequesterID, &createdByNS,
+		&r.RequesterID, &createdByNS, &requesterRoleNS,
 	); err != nil {
 		return domain.AssetRequest{}, err
 	}
@@ -81,6 +84,7 @@ func scanAssetRequest(scanner interface{ Scan(...any) error }) (domain.AssetRequ
 		r.RevisedFromID = &revisedFromIDNS.String
 	}
 	r.CreatedBy = createdByNS.String
+	r.RequesterRole = requesterRoleNS.String
 	return r, nil
 }
 
@@ -99,7 +103,7 @@ func (repo *requestRepository) List(ctx context.Context, q domain.RequestListQue
 		statuses = []string{} // an empty array, not NULL: cardinality(NULL) would filter everything out
 	}
 	rows, err := repo.db.QueryContext(ctx, `SELECT`+requestSelectColumns+requestSelectFrom+`
-		WHERE ($1 = '' OR ar.id ILIKE $2 OR o.name ILIKE $2 OR u.name ILIKE $2)
+		WHERE ($1 = '' OR ar.id ILIKE $2 OR o.name ILIKE $2 OR u.name ILIKE $2 OR ar.requester_name ILIKE $2)
 		  AND ($3 = '' OR at.code = $3)
 		  AND (cardinality($4::text[]) = 0 OR ar.status = ANY($4::text[]))
 		  AND ($5 = '' OR ar.created_by = $5 OR ar.requester_id = $5)
@@ -251,49 +255,58 @@ func (repo *requestRepository) GetByApprovalRequestID(ctx context.Context, appro
 	return &item, nil
 }
 
-func (repo *requestRepository) ResolveRequester(ctx context.Context, nameOrEmail string) (*domain.RequesterInfo, error) {
+// requesterSelect finds a user together with the rank of their primary role.
+const requesterSelect = `
+	SELECT u.id, u.employee_no, COALESCE(r.approval_rank, 0), u.name, u.email
+	FROM users u
+	LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.is_primary = 1
+	LEFT JOIN roles r ON r.id = ur.role_id`
+
+func (repo *requestRepository) scanRequester(row *sql.Row, what string) (*domain.RequesterInfo, error) {
 	var info domain.RequesterInfo
 	var approvalRank sql.NullInt64
-	err := repo.db.QueryRowContext(ctx, `
-		SELECT u.id, u.employee_no, COALESCE(r.approval_rank, 0)
-		FROM users u
-		LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.is_primary = 1
-		LEFT JOIN roles r ON r.id = ur.role_id
-		WHERE u.name = $1 OR u.email = $2
-		LIMIT 1
-	`, nameOrEmail, nameOrEmail).Scan(&info.UserID, &info.EmployeeNo, &approvalRank)
-	if err != nil {
+	if err := row.Scan(&info.UserID, &info.EmployeeNo, &approvalRank, &info.Name, &info.Email); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("resolve requester %q: %w", nameOrEmail, err)
+		return nil, fmt.Errorf("resolve requester %q: %w", what, err)
 	}
 	info.ApprovalRank = int(approvalRank.Int64)
 	return &info, nil
 }
 
+func (repo *requestRepository) ResolveRequester(ctx context.Context, nameOrEmail string) (*domain.RequesterInfo, error) {
+	return repo.scanRequester(repo.db.QueryRowContext(ctx,
+		requesterSelect+` WHERE u.name = $1 OR u.email = $2 ORDER BY u.id LIMIT 1`, nameOrEmail, nameOrEmail), nameOrEmail)
+}
+
+func (repo *requestRepository) ResolveRequesterByUserID(ctx context.Context, userID string) (*domain.RequesterInfo, error) {
+	return repo.scanRequester(repo.db.QueryRowContext(ctx, requesterSelect+` WHERE u.id = $1`, userID), userID)
+}
+
 func (repo *requestRepository) Create(ctx context.Context, requesterID string, input domain.CreateRequestInput) (string, error) {
-	id := "REQ-" + strings.ToUpper(uuid.NewString()[:8])
+	// Ids are REQ-0001, REQ-0002, ...: the number comes from a sequence, so two
+	// requests created at the same moment can never get the same one.
+	var number int64
+	if err := repo.db.QueryRowContext(ctx, `SELECT nextval('request_number_seq')`).Scan(&number); err != nil {
+		return "", fmt.Errorf("next request number: %w", err)
+	}
+	id := fmt.Sprintf("REQ-%04d", number)
 
-	// Resolve category to its asset_type_id so it survives a read-back
-	var assetTypeID sql.NullString
-	_ = repo.db.QueryRowContext(ctx, `SELECT id FROM asset_types WHERE code = $1 OR name = $2 LIMIT 1`, input.Category, input.Category).Scan(&assetTypeID)
-
-	var outletID sql.NullString
-	if input.Outlet != "" {
-		_ = repo.db.QueryRowContext(ctx, `SELECT id FROM outlets WHERE name = $1 OR code = $2 LIMIT 1`, input.Outlet, input.Outlet).Scan(&outletID)
+	// The category must exist; an unknown one is an error, not a request without a type.
+	var assetTypeID string
+	if err := repo.db.QueryRowContext(ctx, `SELECT id FROM asset_types WHERE code = $1`, input.Category).Scan(&assetTypeID); err != nil {
+		return "", fmt.Errorf("find asset type %q: %w", input.Category, err)
 	}
 
-	var distributorID sql.NullString
-	if input.Distributor != "" {
-		_ = repo.db.QueryRowContext(ctx, `SELECT id FROM distributors WHERE name = $1 OR code = $2 LIMIT 1`, input.Distributor, input.Distributor).Scan(&distributorID)
-	}
-
+	// The service has already matched the distributor and outlet against master
+	// data and passes their ids; empty means "none" (a distributor typed by hand).
 	_, err := repo.db.ExecContext(ctx, `
 		INSERT INTO asset_requests
-			(id, requester_id, asset_type_id, outlet_id, distributor_id, sales_division, request_type, quantity, priority, status, current_step, fulfillment_step, revised_from_id, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, NULL, $11, NULLIF($12::text, ''))
-	`, id, requesterID, assetTypeID, outletID, distributorID, input.SalesDivision, input.ReqType, input.Qty, input.Priority, domain.RequestStatusWaitingApproval, input.RevisedFromID, input.CreatedBy)
+			(id, requester_id, asset_type_id, outlet_id, distributor_id, distributor_manual, sales_division, request_type, quantity, priority, status, current_step, fulfillment_step, revised_from_id, created_by, requester_name, requester_role)
+		VALUES ($1, $2, $3, NULLIF($4::text, ''), NULLIF($5::text, ''), NULLIF($6::text, ''), $7, NULLIF($8::text, ''), $9, $10, $11, 0, NULL, $12, NULLIF($13::text, ''), NULLIF($14::text, ''), NULLIF($15::text, ''))
+	`, id, requesterID, assetTypeID, input.OutletID, input.DistributorID, input.DistributorManual, input.SalesDivision, input.ReqType,
+		input.Qty, input.Priority, domain.RequestStatusWaitingApproval, input.RevisedFromID, input.CreatedBy, input.RequesterName, input.RequesterRole)
 	if err != nil {
 		return "", fmt.Errorf("insert asset request: %w", err)
 	}

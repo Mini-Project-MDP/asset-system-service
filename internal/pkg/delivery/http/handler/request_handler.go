@@ -45,15 +45,17 @@ func (h *RequestHandler) viewerOf(c fiber.Ctx) (viewer domain.Viewer, ok bool, e
 }
 
 type createRequestBody struct {
-	Category      string `json:"category"`
-	Outlet        string `json:"outlet"`
-	Distributor   string `json:"distributor"`
-	SalesDivision string `json:"salesDivision"`
-	ReqType       string `json:"reqType"`
-	RequesterRole string `json:"requesterRole"`
-	RequesterName string `json:"requesterName"`
-	Qty           int    `json:"qty"`
-	Priority      string `json:"priority"`
+	Category    string `json:"category"`
+	Outlet      string `json:"outlet"`
+	Distributor string `json:"distributor"`
+	// DistributorManual is a distributor typed in by hand ("Lainnya"); send it instead of Distributor.
+	DistributorManual string `json:"distributorManual"`
+	SalesDivision     string `json:"salesDivision"`
+	ReqType           string `json:"reqType"`
+	RequesterRole     string `json:"requesterRole"`
+	RequesterName     string `json:"requesterName"`
+	Qty               int    `json:"qty"`
+	Priority          string `json:"priority"`
 	// RevisedFromID: set when this request resubmits one that was sent back
 	// for revision (see docs/approval-engine-integration-plan.md Fase 0).
 	RevisedFromID *string `json:"revisedFromId,omitempty"`
@@ -168,17 +170,18 @@ func (h *RequestHandler) Create(c fiber.Ctx) error {
 	}
 
 	item, err := h.service.Create(c.Context(), domain.CreateRequestInput{
-		CreatedBy:     viewer.UserID,
-		Category:      body.Category,
-		Outlet:        body.Outlet,
-		Distributor:   body.Distributor,
-		SalesDivision: body.SalesDivision,
-		ReqType:       body.ReqType,
-		RequesterRole: body.RequesterRole,
-		RequesterName: body.RequesterName,
-		Qty:           body.Qty,
-		Priority:      body.Priority,
-		RevisedFromID: body.RevisedFromID,
+		CreatedBy:         viewer.UserID,
+		Category:          body.Category,
+		Outlet:            body.Outlet,
+		Distributor:       body.Distributor,
+		DistributorManual: body.DistributorManual,
+		SalesDivision:     body.SalesDivision,
+		ReqType:           body.ReqType,
+		RequesterRole:     body.RequesterRole,
+		RequesterName:     body.RequesterName,
+		Qty:               body.Qty,
+		Priority:          body.Priority,
+		RevisedFromID:     body.RevisedFromID,
 	})
 	if err != nil {
 		return requestErrorResponse(c, err)
@@ -333,11 +336,16 @@ func (h *RequestHandler) AdvanceFulfillment(c fiber.Ctx) error {
 // status code, instead of collapsing every failure to 500.
 func requestErrorResponse(c fiber.Ctx, err error) error {
 	var engineErr *domain.EngineAPIError
+	var validationErr *service.RequestValidationError
 	switch {
 	case errors.Is(err, service.ErrRequestNotFound):
 		return response.Error(c, fiber.StatusNotFound, "Request not found")
+	case errors.As(err, &validationErr):
+		return response.ErrorWithField(c, fiber.StatusBadRequest, validationErr.Message, validationErr.Field)
 	case errors.Is(err, service.ErrRequesterNotFound):
-		return response.Error(c, fiber.StatusBadRequest, "Requester not found")
+		return response.ErrorWithField(c, fiber.StatusBadRequest, "Requester tidak dikenali.", "requesterName")
+	case errors.Is(err, service.ErrFormOptionsUnavailable):
+		return response.Error(c, fiber.StatusServiceUnavailable, "Form options are not available")
 	case errors.Is(err, service.ErrInvalidRequestPayload):
 		return response.Error(c, fiber.StatusBadRequest, "Invalid request payload")
 	case errors.Is(err, service.ErrUnsupportedApprovalAction):
@@ -365,4 +373,22 @@ func requestErrorResponse(c fiber.Ctx, err error) error {
 	default:
 		return response.Error(c, fiber.StatusInternalServerError, err.Error())
 	}
+}
+
+// FormOptions handles GET /api/v1/requests/form-options.
+// @Summary What the New Request form offers
+// @Description Distributors with their outlets, all outlets (for a distributor typed in by hand), sales divisions, request types, priorities and the requester roles allowed per category.
+// @Tags Requests
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} response.Response
+// @Failure 401 {object} response.Response
+// @Failure 403 {object} response.Response
+// @Router /api/v1/requests/form-options [get]
+func (h *RequestHandler) FormOptions(c fiber.Ctx) error {
+	options, err := h.service.FormOptions(c.Context())
+	if err != nil {
+		return requestErrorResponse(c, err)
+	}
+	return response.Success(c, mapFormOptions(*options))
 }

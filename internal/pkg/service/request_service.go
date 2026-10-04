@@ -14,14 +14,19 @@ import (
 type requestService struct {
 	repo   domain.RequestRepository
 	engine domain.ApprovalEngineClient
+	forms  domain.RequestFormSource // master data behind the New Request form; see WithFormSource
 }
 
 // NewRequestService creates a new instance of domain.RequestService. engine
 // may be nil only in tests that don't exercise Create (e.g. List-only
 // fakes) — production wiring (cmd/api/main.go, api/index.go) always passes
 // a real client.
-func NewRequestService(repo domain.RequestRepository, engine domain.ApprovalEngineClient) domain.RequestService {
-	return &requestService{repo: repo, engine: engine}
+func NewRequestService(repo domain.RequestRepository, engine domain.ApprovalEngineClient, options ...RequestServiceOption) domain.RequestService {
+	s := &requestService{repo: repo, engine: engine}
+	for _, option := range options {
+		option(s)
+	}
+	return s
 }
 
 // ErrInvalidRequestFilter: a list filter value is not one the API knows.
@@ -128,16 +133,22 @@ func (s *requestService) refreshFromEngine(ctx context.Context, item *domain.Ass
 }
 
 func (s *requestService) Create(ctx context.Context, input domain.CreateRequestInput) (*domain.AssetRequest, error) {
-	if input.Qty < 1 || input.Category == "" {
-		return nil, ErrInvalidRequestPayload
+	var data *domain.FormMasterData
+	if s.forms != nil {
+		loaded, err := s.forms.FormMasterData(ctx)
+		if err != nil {
+			return nil, err
+		}
+		data = &loaded
 	}
-
-	requester, err := s.repo.ResolveRequester(ctx, input.RequesterName)
+	input, err := validateCreate(input, data)
 	if err != nil {
 		return nil, err
 	}
-	if requester == nil {
-		return nil, ErrRequesterNotFound
+
+	requester, err := s.resolveRequester(ctx, input)
+	if err != nil {
+		return nil, err
 	}
 
 	id, err := s.repo.Create(ctx, requester.UserID, input)
@@ -187,8 +198,9 @@ func (s *requestService) syncToApprovalEngine(ctx context.Context, id string, re
 		Payload: map[string]any{
 			"requesterApprovalRank": requester.ApprovalRank,
 			"category":              input.Category,
+			"requesterRole":         input.RequesterRole,
 			"outlet":                input.Outlet,
-			"distributor":           input.Distributor,
+			"distributor":           distributorLabel(input),
 			"salesDivision":         input.SalesDivision,
 			"reqType":               input.ReqType,
 			"qty":                   input.Qty,
@@ -216,12 +228,17 @@ func (s *requestService) syncToApprovalEngine(ctx context.Context, id string, re
 			log.Printf("request %s: save approval steps failed: %v", id, err)
 		}
 	}
-	_ = s.repo.AddHistory(ctx, id, domain.ApprovalHistoryItem{
+	submitted := domain.ApprovalHistoryItem{
 		Role:   requester.EmployeeNo,
 		Action: "Submitted",
 		Date:   time.Now().Format("02 Jan 2006"),
 		Type:   "go",
-	})
+	}
+	if standsIn(input.RequesterName, requester) {
+		remark := "Atas nama: " + input.RequesterName
+		submitted.Comment = &remark
+	}
+	_ = s.repo.AddHistory(ctx, id, submitted)
 }
 
 // mapEngineStepsToItems maps Approval-Engine-Service's EngineApprovalStep slice
@@ -266,9 +283,11 @@ func (s *requestService) RetryPendingApprovalSync(ctx context.Context) (retried,
 	}
 
 	for _, item := range items {
-		requester, rErr := s.repo.ResolveRequester(ctx, item.RequesterName)
+		// The requester is the person stored on the request: the name typed on
+		// the form is free text and may belong to nobody.
+		requester, rErr := s.repo.ResolveRequesterByUserID(ctx, item.RequesterID)
 		if rErr != nil || requester == nil {
-			log.Printf("retry sync %s: cannot resolve requester %q: %v", item.ID, item.RequesterName, rErr)
+			log.Printf("retry sync %s: cannot resolve requester %q: %v", item.ID, item.RequesterID, rErr)
 			failed++
 			continue
 		}
@@ -280,6 +299,7 @@ func (s *requestService) RetryPendingApprovalSync(ctx context.Context) (retried,
 			SalesDivision: item.SalesDivision,
 			ReqType:       item.RequestType,
 			RequesterName: item.RequesterName,
+			RequesterRole: item.RequesterRole,
 			Qty:           item.Quantity,
 			Priority:      item.Priority,
 		}

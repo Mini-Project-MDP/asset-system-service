@@ -10,6 +10,8 @@ type Response struct {
 	Message string      `json:"message,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
 	Error   interface{} `json:"error,omitempty"`
+	// Field names the form field an error is about, so the UI can mark it.
+	Field string `json:"field,omitempty"`
 }
 
 // JSON sends a standardized success JSON response.
@@ -36,5 +38,14 @@ func Error(c fiber.Ctx, statusCode int, errMessage string) error {
 	return c.Status(statusCode).JSON(Response{
 		Success: false,
 		Error:   errMessage,
+	})
+}
+
+// ErrorWithField sends an error response that also names the form field at fault.
+func ErrorWithField(c fiber.Ctx, statusCode int, errMessage, field string) error {
+	return c.Status(statusCode).JSON(Response{
+		Success: false,
+		Error:   errMessage,
+		Field:   field,
 	})
 }

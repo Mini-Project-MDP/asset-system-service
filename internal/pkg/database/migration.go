@@ -31,6 +31,10 @@ func ensureApprovalEngineColumns(ctx context.Context, db *sql.DB) error {
 		// who submitted the request (requester_id is who it is for)
 		`ALTER TABLE asset_requests ADD COLUMN IF NOT EXISTS created_by VARCHAR(36)`,
 		`CREATE INDEX IF NOT EXISTS idx_asset_requests_created_by ON asset_requests (created_by)`,
+		// a distributor typed in by hand, the requester name and role as chosen on the New Request form
+		`ALTER TABLE asset_requests ADD COLUMN IF NOT EXISTS distributor_manual VARCHAR(150)`,
+		`ALTER TABLE asset_requests ADD COLUMN IF NOT EXISTS requester_name VARCHAR(150)`,
+		`ALTER TABLE asset_requests ADD COLUMN IF NOT EXISTS requester_role VARCHAR(50)`,
 		`ALTER TABLE request_history ADD COLUMN IF NOT EXISTS role VARCHAR(100)`,
 		`ALTER TABLE request_history ADD COLUMN IF NOT EXISTS event_type VARCHAR(20) DEFAULT 'go'`,
 	}
@@ -164,6 +168,18 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS sales_divisions (
+		id VARCHAR(36) PRIMARY KEY,
+		name VARCHAR(100) NOT NULL,
+		is_active INTEGER NOT NULL DEFAULT 1,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_divisions_name ON sales_divisions (LOWER(name));
+
+	-- Request ids are REQ-0001, REQ-0002, ... taken from this sequence.
+	CREATE SEQUENCE IF NOT EXISTS request_number_seq;
+
 	CREATE TABLE IF NOT EXISTS phone_brands (
 		id VARCHAR(36) PRIMARY KEY,
 		name VARCHAR(100) NOT NULL,
@@ -214,6 +230,9 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 		current_step_name VARCHAR(100),
 		revised_from_id VARCHAR(36),
 		created_by VARCHAR(36),
+		distributor_manual VARCHAR(150),
+		requester_name VARCHAR(150),
+		requester_role VARCHAR(50),
 		created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (requester_id) REFERENCES users(id),
@@ -292,6 +311,13 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 	('perm_req_read_all', 'request:read_all', 'Read All Requests', 'See every request, not only the ones you submitted (Admin and Asset Team)'),
 	('perm_appr_read', 'approvals:read', 'Read Approvals', 'Open the Approvals module: the queue and the requests in it (Admin and approvers)'),
 	('perm_masterdata', 'masterdata:manage', 'Manage Master Data', 'Create and edit outlets and distributors (Admin and Asset Team)')
+	ON CONFLICT (id) DO NOTHING;
+
+	INSERT INTO sales_divisions (id, name) VALUES
+	('sdiv_m1_bis', 'M1 BIS'),
+	('sdiv_m1_cwc', 'M1 CWC'),
+	('sdiv_m245', 'M245'),
+	('sdiv_m3', 'M3')
 	ON CONFLICT (id) DO NOTHING;
 
 	INSERT INTO asset_types (id, code, name, identifier_type, identifier_required) VALUES
