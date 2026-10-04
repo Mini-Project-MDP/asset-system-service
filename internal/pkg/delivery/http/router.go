@@ -23,12 +23,13 @@ type DatabasePinger interface {
 
 // Handlers encapsulates all HTTP handlers for the application.
 type Handlers struct {
-	Auth       *handler.AuthHandler
-	User       *handler.UserHandler
-	Request    *handler.RequestHandler
-	Catalog    *handler.CatalogHandler
-	MasterData *handler.MasterDataHandler
-	Webhook    *handler.WebhookHandler
+	Auth         *handler.AuthHandler
+	User         *handler.UserHandler
+	Request      *handler.RequestHandler
+	Catalog      *handler.CatalogHandler
+	MasterData   *handler.MasterDataHandler
+	PhoneCatalog *handler.PhoneCatalogHandler
+	Webhook      *handler.WebhookHandler
 }
 
 // Dependencies contains infrastructure used by the HTTP application.
@@ -97,6 +98,15 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 	// Protected routes (require JWT)
 	if deps.TokenManager != nil {
 		protected := api.Group("", middleware.JWTAuth(deps.TokenManager))
+		// Registered before the /fulfillment/:id routes so "phone-catalog" is not read as an id.
+		if deps.Handlers.PhoneCatalog != nil {
+			protected.Get("/fulfillment/phone-catalog", middleware.RequirePermission("fulfillment:read"), deps.Handlers.PhoneCatalog.Catalog)
+			catalog := protected.Group("/settings", middleware.RequirePermission("settings:manage"))
+			catalog.Post("/phone-brands", deps.Handlers.PhoneCatalog.CreateBrand)
+			catalog.Put("/phone-brands/:id", deps.Handlers.PhoneCatalog.UpdateBrand)
+			catalog.Post("/phone-models", deps.Handlers.PhoneCatalog.CreateModel)
+			catalog.Put("/phone-models/:id", deps.Handlers.PhoneCatalog.UpdateModel)
+		}
 		if deps.Handlers.Request != nil {
 			requests := protected.Group("/requests", middleware.RequirePermission("request:read"))
 			requests.Get("/", deps.Handlers.Request.List)
@@ -143,6 +153,8 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 		if deps.Handlers.User != nil {
 			// User Management
 			protected.Get("/users", middleware.RequirePermission("user:read"), deps.Handlers.User.GetUsers)
+			protected.Post("/users", middleware.RequirePermission("user:write"), deps.Handlers.User.CreateUser)
+			protected.Put("/users/:id", middleware.RequirePermission("user:write"), deps.Handlers.User.UpdateUser)
 			protected.Post("/users/:id/master", middleware.RequirePermission("user:master"), deps.Handlers.User.SetMasterUser)
 			protected.Post("/users/:id/roles", middleware.RequirePermission("role:manage"), deps.Handlers.User.AssignUserRoles)
 		}

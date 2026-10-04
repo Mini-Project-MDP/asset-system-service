@@ -107,6 +107,29 @@ CREATE TABLE IF NOT EXISTS distributor_outlets (
 
 CREATE INDEX IF NOT EXISTS idx_distributor_outlets_distributor ON distributor_outlets(distributor_id);
 
+CREATE TABLE IF NOT EXISTS phone_brands (
+    id VARCHAR(36) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_phone_brands_name ON phone_brands (LOWER(name));
+
+CREATE TABLE IF NOT EXISTS phone_models (
+    id VARCHAR(36) PRIMARY KEY,
+    brand_id VARCHAR(36) NOT NULL REFERENCES phone_brands(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_phone_models_brand_name ON phone_models (brand_id, LOWER(name));
+
 CREATE TABLE IF NOT EXISTS asset_types (
     id VARCHAR(36) PRIMARY KEY,
     code VARCHAR(50) NOT NULL UNIQUE,

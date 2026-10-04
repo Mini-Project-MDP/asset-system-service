@@ -51,13 +51,15 @@ func initialize() error {
 	tokenManager := jwt.NewTokenManager(applicationConfig.JWTSecret, applicationConfig.JWTExpiryDuration)
 	authRepo := repository.NewAuthRepository(db)
 	authService := service.NewAuthService(authRepo, tokenManager)
+	userService := service.NewUserService(repository.NewUserAdminRepository(databaseConnection))
 	authHandlerInstance := appHandler.NewAuthHandler(authService)
-	userHandlerInstance := appHandler.NewUserHandler(authService)
+	userHandlerInstance := appHandler.NewUserHandler(authService, userService)
 
 	approvalEngineClient := approvalengine.New(applicationConfig.ApprovalEngineBaseURL, applicationConfig.ApprovalEngineAPIKey, nil)
 	requestRepo := repository.NewRequestRepository(databaseConnection)
 	requestService := service.NewRequestService(requestRepo, approvalEngineClient)
 	masterDataService := service.NewMasterDataService(repository.NewMasterDataRepository(databaseConnection))
+	phoneCatalogService := service.NewPhoneCatalogService(repository.NewPhoneCatalogRepository(databaseConnection))
 
 	fiberApp := appHttp.NewRouter(appHttp.Dependencies{
 		Database:             db,
@@ -66,12 +68,13 @@ func initialize() error {
 		AllowedOrigins:       applicationConfig.AllowedOrigins,
 		ApprovalEngineAPIKey: applicationConfig.ApprovalEngineAPIKey,
 		Handlers: appHttp.Handlers{
-			Auth:       authHandlerInstance,
-			User:       userHandlerInstance,
-			Request:    appHandler.NewRequestHandler(requestService),
-			Catalog:    appHandler.NewCatalogHandler(databaseConnection),
-			MasterData: appHandler.NewMasterDataHandler(masterDataService),
-			Webhook:    appHandler.NewWebhookHandler(requestService),
+			Auth:         authHandlerInstance,
+			User:         userHandlerInstance,
+			Request:      appHandler.NewRequestHandler(requestService),
+			Catalog:      appHandler.NewCatalogHandler(databaseConnection),
+			MasterData:   appHandler.NewMasterDataHandler(masterDataService),
+			PhoneCatalog: appHandler.NewPhoneCatalogHandler(phoneCatalogService),
+			Webhook:      appHandler.NewWebhookHandler(requestService),
 		},
 	})
 

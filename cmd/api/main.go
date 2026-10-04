@@ -67,13 +67,15 @@ func run() error {
 	// Composition Root (Dependency Injection)
 	authRepo := repository.NewAuthRepository(databaseConnection)
 	authService := service.NewAuthService(authRepo, tokenManager)
+	userService := service.NewUserService(repository.NewUserAdminRepository(databaseConnection))
 	authHandler := handler.NewAuthHandler(authService)
-	userHandler := handler.NewUserHandler(authService)
+	userHandler := handler.NewUserHandler(authService, userService)
 
 	approvalEngineClient := approvalengine.New(applicationConfig.ApprovalEngineBaseURL, applicationConfig.ApprovalEngineAPIKey, nil)
 	requestRepo := repository.NewRequestRepository(databaseConnection)
 	requestService := service.NewRequestService(requestRepo, approvalEngineClient)
 	masterDataService := service.NewMasterDataService(repository.NewMasterDataRepository(databaseConnection))
+	phoneCatalogService := service.NewPhoneCatalogService(repository.NewPhoneCatalogRepository(databaseConnection))
 
 	fiberApp := http.NewRouter(http.Dependencies{
 		Database:             databaseConnection,
@@ -81,12 +83,13 @@ func run() error {
 		TokenManager:         tokenManager,
 		ApprovalEngineAPIKey: applicationConfig.ApprovalEngineAPIKey,
 		Handlers: http.Handlers{
-			Auth:       authHandler,
-			User:       userHandler,
-			Request:    handler.NewRequestHandler(requestService),
-			Catalog:    handler.NewCatalogHandler(databaseConnection),
-			MasterData: handler.NewMasterDataHandler(masterDataService),
-			Webhook:    handler.NewWebhookHandler(requestService),
+			Auth:         authHandler,
+			User:         userHandler,
+			Request:      handler.NewRequestHandler(requestService),
+			Catalog:      handler.NewCatalogHandler(databaseConnection),
+			MasterData:   handler.NewMasterDataHandler(masterDataService),
+			PhoneCatalog: handler.NewPhoneCatalogHandler(phoneCatalogService),
+			Webhook:      handler.NewWebhookHandler(requestService),
 		},
 	})
 
