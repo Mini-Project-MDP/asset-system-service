@@ -23,11 +23,12 @@ type DatabasePinger interface {
 
 // Handlers encapsulates all HTTP handlers for the application.
 type Handlers struct {
-	Auth    *handler.AuthHandler
-	User    *handler.UserHandler
-	Request *handler.RequestHandler
-	Catalog *handler.CatalogHandler
-	Webhook *handler.WebhookHandler
+	Auth       *handler.AuthHandler
+	User       *handler.UserHandler
+	Request    *handler.RequestHandler
+	Catalog    *handler.CatalogHandler
+	MasterData *handler.MasterDataHandler
+	Webhook    *handler.WebhookHandler
 }
 
 // Dependencies contains infrastructure used by the HTTP application.
@@ -113,10 +114,18 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 		}
 		if deps.Handlers.Catalog != nil {
 			protected.Get("/dashboard/overview", deps.Handlers.Catalog.Dashboard)
+		}
+		if deps.Handlers.MasterData != nil {
 			settings := protected.Group("/settings", middleware.RequirePermission("settings:manage"))
-			settings.Get("/outlets", deps.Handlers.Catalog.Outlets)
-			settings.Get("/distributors", deps.Handlers.Catalog.Distributors)
-			settings.Get("/types", deps.Handlers.Catalog.Types)
+			settings.Get("/outlets", deps.Handlers.MasterData.Outlets)
+			settings.Post("/outlets", deps.Handlers.MasterData.CreateOutlet)
+			settings.Put("/outlets/:id", deps.Handlers.MasterData.UpdateOutlet)
+			settings.Get("/distributors", deps.Handlers.MasterData.Distributors)
+			settings.Post("/distributors", deps.Handlers.MasterData.CreateDistributor)
+			settings.Put("/distributors/:id", deps.Handlers.MasterData.UpdateDistributor)
+			settings.Get("/types", deps.Handlers.MasterData.Types)
+			settings.Post("/types", deps.Handlers.MasterData.CreateType)
+			settings.Put("/types/:id", deps.Handlers.MasterData.UpdateType)
 		}
 
 		if deps.Handlers.Auth != nil {

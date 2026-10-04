@@ -99,6 +99,14 @@ CREATE TABLE IF NOT EXISTS distributors (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS distributor_outlets (
+    distributor_id VARCHAR(36) NOT NULL REFERENCES distributors(id) ON DELETE CASCADE,
+    outlet_id VARCHAR(36) NOT NULL PRIMARY KEY REFERENCES outlets(id) ON DELETE CASCADE,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_distributor_outlets_distributor ON distributor_outlets(distributor_id);
+
 CREATE TABLE IF NOT EXISTS asset_types (
     id VARCHAR(36) PRIMARY KEY,
     code VARCHAR(50) NOT NULL UNIQUE,

@@ -57,6 +57,7 @@ func initialize() error {
 	approvalEngineClient := approvalengine.New(applicationConfig.ApprovalEngineBaseURL, applicationConfig.ApprovalEngineAPIKey, nil)
 	requestRepo := repository.NewRequestRepository(databaseConnection)
 	requestService := service.NewRequestService(requestRepo, approvalEngineClient)
+	masterDataService := service.NewMasterDataService(repository.NewMasterDataRepository(databaseConnection))
 
 	fiberApp := appHttp.NewRouter(appHttp.Dependencies{
 		Database:             db,
@@ -65,11 +66,12 @@ func initialize() error {
 		AllowedOrigins:       applicationConfig.AllowedOrigins,
 		ApprovalEngineAPIKey: applicationConfig.ApprovalEngineAPIKey,
 		Handlers: appHttp.Handlers{
-			Auth:    authHandlerInstance,
-			User:    userHandlerInstance,
-			Request: appHandler.NewRequestHandler(requestService),
-			Catalog: appHandler.NewCatalogHandler(databaseConnection),
-			Webhook: appHandler.NewWebhookHandler(requestService),
+			Auth:       authHandlerInstance,
+			User:       userHandlerInstance,
+			Request:    appHandler.NewRequestHandler(requestService),
+			Catalog:    appHandler.NewCatalogHandler(databaseConnection),
+			MasterData: appHandler.NewMasterDataHandler(masterDataService),
+			Webhook:    appHandler.NewWebhookHandler(requestService),
 		},
 	})
 
