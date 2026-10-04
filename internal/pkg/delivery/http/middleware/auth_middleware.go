@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"context"
+	"log"
 	"strings"
 
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/jwt"
@@ -33,9 +35,26 @@ func JWTAuth(tm *jwt.TokenManager) fiber.Handler {
 	}
 }
 
-// RequirePermission enforces that the current user possesses a specific permission.
+// PermissionResolver tells what a caller is allowed to do. It exists because a
+// token alone is not a reliable source: see service.PermissionResolver.
+type PermissionResolver interface {
+	PermissionsFor(ctx context.Context, claims *jwt.UserClaims) ([]string, error)
+}
+
+// PermissionGuard builds the per-route permission checks.
+type PermissionGuard struct {
+	resolver PermissionResolver
+}
+
+// NewPermissionGuard creates a guard. With a nil resolver, permissions are
+// taken from the token itself (the behaviour before the resolver existed).
+func NewPermissionGuard(resolver PermissionResolver) *PermissionGuard {
+	return &PermissionGuard{resolver: resolver}
+}
+
+// Require enforces that the current user holds permissionCode.
 // Master users automatically pass permission checks.
-func RequirePermission(permissionCode string) fiber.Handler {
+func (g *PermissionGuard) Require(permissionCode string) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		val := c.Locals(UserContextKey)
 		claims, ok := val.(*jwt.UserClaims)
@@ -47,7 +66,17 @@ func RequirePermission(permissionCode string) fiber.Handler {
 			return c.Next()
 		}
 
-		for _, p := range claims.Permissions {
+		granted := claims.Permissions
+		if g.resolver != nil {
+			resolved, err := g.resolver.PermissionsFor(c.Context(), claims)
+			if err != nil {
+				log.Printf("resolve permissions for %q: %v", claims.UserID, err)
+				return response.Error(c, fiber.StatusInternalServerError, "Unable to verify permissions")
+			}
+			granted = resolved
+		}
+
+		for _, p := range granted {
 			if p == permissionCode {
 				return c.Next()
 			}
@@ -55,6 +84,12 @@ func RequirePermission(permissionCode string) fiber.Handler {
 
 		return response.Error(c, fiber.StatusForbidden, "Forbidden: permission '"+permissionCode+"' required")
 	}
+}
+
+// RequirePermission enforces a permission using the token's own permissions
+// only. Prefer PermissionGuard.Require, which reads them from the database.
+func RequirePermission(permissionCode string) fiber.Handler {
+	return NewPermissionGuard(nil).Require(permissionCode)
 }
 
 // RequireMasterUser enforces that only designated Master Users can access the endpoint.

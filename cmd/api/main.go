@@ -67,6 +67,7 @@ func run() error {
 	// Composition Root (Dependency Injection)
 	authRepo := repository.NewAuthRepository(databaseConnection)
 	authService := service.NewAuthService(authRepo, tokenManager)
+	permissionResolver := service.NewPermissionResolver(authRepo, time.Minute)
 	userService := service.NewUserService(repository.NewUserAdminRepository(databaseConnection))
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(authService, userService)
@@ -77,17 +78,19 @@ func run() error {
 	masterDataService := service.NewMasterDataService(repository.NewMasterDataRepository(databaseConnection))
 	phoneCatalogService := service.NewPhoneCatalogService(repository.NewPhoneCatalogRepository(databaseConnection))
 	imeiService := service.NewImeiService(repository.NewImeiReferenceRepository(databaseConnection))
+	dashboardService := service.NewDashboardService(repository.NewDashboardRepository(databaseConnection), time.Now)
 
 	fiberApp := http.NewRouter(http.Dependencies{
 		Database:             databaseConnection,
 		DatabasePingTimeout:  applicationConfig.DatabasePingTimeout,
 		TokenManager:         tokenManager,
 		ApprovalEngineAPIKey: applicationConfig.ApprovalEngineAPIKey,
+		Permissions:          permissionResolver,
 		Handlers: http.Handlers{
 			Auth:         authHandler,
 			User:         userHandler,
 			Request:      handler.NewRequestHandler(requestService),
-			Catalog:      handler.NewCatalogHandler(databaseConnection),
+			Dashboard:    handler.NewDashboardHandler(dashboardService),
 			MasterData:   handler.NewMasterDataHandler(masterDataService),
 			PhoneCatalog: handler.NewPhoneCatalogHandler(phoneCatalogService),
 			Imei:         handler.NewImeiHandler(imeiService),

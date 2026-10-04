@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/client/approvalengine"
 	"github.com/Mini-Project-MDP/asset-system-service/internal/pkg/config"
@@ -51,6 +52,7 @@ func initialize() error {
 	tokenManager := jwt.NewTokenManager(applicationConfig.JWTSecret, applicationConfig.JWTExpiryDuration)
 	authRepo := repository.NewAuthRepository(db)
 	authService := service.NewAuthService(authRepo, tokenManager)
+	permissionResolver := service.NewPermissionResolver(authRepo, time.Minute)
 	userService := service.NewUserService(repository.NewUserAdminRepository(databaseConnection))
 	authHandlerInstance := appHandler.NewAuthHandler(authService)
 	userHandlerInstance := appHandler.NewUserHandler(authService, userService)
@@ -61,6 +63,7 @@ func initialize() error {
 	masterDataService := service.NewMasterDataService(repository.NewMasterDataRepository(databaseConnection))
 	phoneCatalogService := service.NewPhoneCatalogService(repository.NewPhoneCatalogRepository(databaseConnection))
 	imeiService := service.NewImeiService(repository.NewImeiReferenceRepository(databaseConnection))
+	dashboardService := service.NewDashboardService(repository.NewDashboardRepository(databaseConnection), time.Now)
 
 	fiberApp := appHttp.NewRouter(appHttp.Dependencies{
 		Database:             db,
@@ -68,11 +71,12 @@ func initialize() error {
 		TokenManager:         tokenManager,
 		AllowedOrigins:       applicationConfig.AllowedOrigins,
 		ApprovalEngineAPIKey: applicationConfig.ApprovalEngineAPIKey,
+		Permissions:          permissionResolver,
 		Handlers: appHttp.Handlers{
 			Auth:         authHandlerInstance,
 			User:         userHandlerInstance,
 			Request:      appHandler.NewRequestHandler(requestService),
-			Catalog:      appHandler.NewCatalogHandler(databaseConnection),
+			Dashboard:    appHandler.NewDashboardHandler(dashboardService),
 			MasterData:   appHandler.NewMasterDataHandler(masterDataService),
 			PhoneCatalog: appHandler.NewPhoneCatalogHandler(phoneCatalogService),
 			Imei:         appHandler.NewImeiHandler(imeiService),

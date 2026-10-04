@@ -283,7 +283,8 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 	('perm_req_approve', 'request:approve', 'Approve Request', 'Approve or reject asset requests'),
 	('perm_ful_process', 'fulfillment:process', 'Process Fulfillment', 'Manage asset dispatch and fulfillment'),
 	('perm_ful_read', 'fulfillment:read', 'Read Fulfillment', 'View fulfillment statuses'),
-	('perm_set_manage', 'settings:manage', 'Manage Settings', 'Update system and application settings')
+	('perm_set_manage', 'settings:manage', 'Manage Settings', 'Update system and application settings'),
+	('perm_dash_read', 'dashboard:read', 'Read Dashboard', 'View the dashboard overview (Admin and Asset Team)')
 	ON CONFLICT (id) DO NOTHING;
 
 	INSERT INTO asset_types (id, code, name, identifier_type, identifier_required) VALUES
@@ -313,10 +314,10 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 	('role_master', 'perm_a_read'), ('role_master', 'perm_a_write'),
 	('role_master', 'perm_req_create'), ('role_master', 'perm_req_read'), ('role_master', 'perm_req_approve'),
 	('role_master', 'perm_ful_process'), ('role_master', 'perm_ful_read'),
-	('role_master', 'perm_set_manage'),
+	('role_master', 'perm_set_manage'), ('role_master', 'perm_dash_read'),
 	('role_mgr', 'perm_u_read'), ('role_mgr', 'perm_a_read'), ('role_mgr', 'perm_a_write'),
 	('role_mgr', 'perm_req_create'), ('role_mgr', 'perm_req_read'), ('role_mgr', 'perm_req_approve'),
-	('role_mgr', 'perm_ful_process'), ('role_mgr', 'perm_ful_read'),
+	('role_mgr', 'perm_ful_process'), ('role_mgr', 'perm_ful_read'), ('role_mgr', 'perm_dash_read'),
 	('role_appr', 'perm_u_read'), ('role_appr', 'perm_a_read'),
 	('role_appr', 'perm_req_create'), ('role_appr', 'perm_req_read'), ('role_appr', 'perm_req_approve'),
 	('role_staff', 'perm_u_read'), ('role_staff', 'perm_a_read'),

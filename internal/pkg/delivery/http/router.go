@@ -26,7 +26,7 @@ type Handlers struct {
 	Auth         *handler.AuthHandler
 	User         *handler.UserHandler
 	Request      *handler.RequestHandler
-	Catalog      *handler.CatalogHandler
+	Dashboard    *handler.DashboardHandler
 	MasterData   *handler.MasterDataHandler
 	PhoneCatalog *handler.PhoneCatalogHandler
 	Imei         *handler.ImeiHandler
@@ -41,6 +41,9 @@ type Dependencies struct {
 	AllowedOrigins       []string
 	Handlers             Handlers
 	ApprovalEngineAPIKey string // secret used to verify inbound webhook signatures
+	// Permissions resolves what a caller may do (from the database). When nil,
+	// the permissions inside the token are used instead.
+	Permissions middleware.PermissionResolver
 }
 
 // NewRouter builds the HTTP router for the service.
@@ -81,6 +84,7 @@ func NewRouter(deps Dependencies) *fiber.App {
 
 func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 	api := app.Group("/api/v1")
+	guard := middleware.NewPermissionGuard(deps.Permissions)
 
 	// Public Auth routes
 	if deps.Handlers.Auth != nil {
@@ -101,36 +105,36 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 		protected := api.Group("", middleware.JWTAuth(deps.TokenManager))
 		// Registered before the /fulfillment/:id routes so "phone-catalog" is not read as an id.
 		if deps.Handlers.PhoneCatalog != nil {
-			protected.Get("/fulfillment/phone-catalog", middleware.RequirePermission("fulfillment:read"), deps.Handlers.PhoneCatalog.Catalog)
-			catalog := protected.Group("/settings", middleware.RequirePermission("settings:manage"))
+			protected.Get("/fulfillment/phone-catalog", guard.Require("fulfillment:read"), deps.Handlers.PhoneCatalog.Catalog)
+			catalog := protected.Group("/settings", guard.Require("settings:manage"))
 			catalog.Post("/phone-brands", deps.Handlers.PhoneCatalog.CreateBrand)
 			catalog.Put("/phone-brands/:id", deps.Handlers.PhoneCatalog.UpdateBrand)
 			catalog.Post("/phone-models", deps.Handlers.PhoneCatalog.CreateModel)
 			catalog.Put("/phone-models/:id", deps.Handlers.PhoneCatalog.UpdateModel)
 		}
 		if deps.Handlers.Imei != nil {
-			protected.Get("/fulfillment/imei-lookup/:imei", middleware.RequirePermission("fulfillment:read"), deps.Handlers.Imei.Lookup)
+			protected.Get("/fulfillment/imei-lookup/:imei", guard.Require("fulfillment:read"), deps.Handlers.Imei.Lookup)
 		}
 		if deps.Handlers.Request != nil {
-			requests := protected.Group("/requests", middleware.RequirePermission("request:read"))
+			requests := protected.Group("/requests", guard.Require("request:read"))
 			requests.Get("/", deps.Handlers.Request.List)
 			requests.Get("/:id", deps.Handlers.Request.Detail)
-			requests.Post("/", middleware.RequirePermission("request:create"), deps.Handlers.Request.Create)
-			approvals := protected.Group("/approvals", middleware.RequirePermission("request:read"))
+			requests.Post("/", guard.Require("request:create"), deps.Handlers.Request.Create)
+			approvals := protected.Group("/approvals", guard.Require("request:read"))
 			approvals.Get("/", deps.Handlers.Request.Approvals)
 			approvals.Get("/:id", deps.Handlers.Request.ApprovalDetail)
-			approvals.Post("/:id/action", middleware.RequirePermission("request:approve"), deps.Handlers.Request.ApprovalAction)
-			fulfillment := protected.Group("/fulfillment", middleware.RequirePermission("fulfillment:read"))
+			approvals.Post("/:id/action", guard.Require("request:approve"), deps.Handlers.Request.ApprovalAction)
+			fulfillment := protected.Group("/fulfillment", guard.Require("fulfillment:read"))
 			fulfillment.Get("/", deps.Handlers.Request.Fulfillment)
 			fulfillment.Get("/:id", deps.Handlers.Request.FulfillmentDetail)
-			fulfillment.Post("/:id/data", middleware.RequirePermission("fulfillment:process"), deps.Handlers.Request.SaveFulfillmentData)
-			fulfillment.Post("/:id/advance", middleware.RequirePermission("fulfillment:process"), deps.Handlers.Request.AdvanceFulfillment)
+			fulfillment.Post("/:id/data", guard.Require("fulfillment:process"), deps.Handlers.Request.SaveFulfillmentData)
+			fulfillment.Post("/:id/advance", guard.Require("fulfillment:process"), deps.Handlers.Request.AdvanceFulfillment)
 		}
-		if deps.Handlers.Catalog != nil {
-			protected.Get("/dashboard/overview", deps.Handlers.Catalog.Dashboard)
+		if deps.Handlers.Dashboard != nil {
+			protected.Get("/dashboard/overview", guard.Require("dashboard:read"), deps.Handlers.Dashboard.Overview)
 		}
 		if deps.Handlers.MasterData != nil {
-			settings := protected.Group("/settings", middleware.RequirePermission("settings:manage"))
+			settings := protected.Group("/settings", guard.Require("settings:manage"))
 			settings.Get("/outlets", deps.Handlers.MasterData.Outlets)
 			settings.Post("/outlets", deps.Handlers.MasterData.CreateOutlet)
 			settings.Put("/outlets/:id", deps.Handlers.MasterData.UpdateOutlet)
@@ -148,19 +152,19 @@ func registerAPIRoutes(app *fiber.App, deps Dependencies) {
 			protected.Put("/me/settings", deps.Handlers.Auth.UpdateUserSettings)
 
 			// Roles & Permissions Management
-			protected.Get("/roles", middleware.RequirePermission("role:manage"), deps.Handlers.Auth.GetRoles)
-			protected.Post("/roles", middleware.RequirePermission("role:manage"), deps.Handlers.Auth.CreateRole)
-			protected.Post("/roles/:id/permissions", middleware.RequirePermission("role:manage"), deps.Handlers.Auth.AssignRolePermissions)
-			protected.Get("/permissions", middleware.RequirePermission("role:manage"), deps.Handlers.Auth.GetPermissions)
+			protected.Get("/roles", guard.Require("role:manage"), deps.Handlers.Auth.GetRoles)
+			protected.Post("/roles", guard.Require("role:manage"), deps.Handlers.Auth.CreateRole)
+			protected.Post("/roles/:id/permissions", guard.Require("role:manage"), deps.Handlers.Auth.AssignRolePermissions)
+			protected.Get("/permissions", guard.Require("role:manage"), deps.Handlers.Auth.GetPermissions)
 		}
 
 		if deps.Handlers.User != nil {
 			// User Management
-			protected.Get("/users", middleware.RequirePermission("user:read"), deps.Handlers.User.GetUsers)
-			protected.Post("/users", middleware.RequirePermission("user:write"), deps.Handlers.User.CreateUser)
-			protected.Put("/users/:id", middleware.RequirePermission("user:write"), deps.Handlers.User.UpdateUser)
-			protected.Post("/users/:id/master", middleware.RequirePermission("user:master"), deps.Handlers.User.SetMasterUser)
-			protected.Post("/users/:id/roles", middleware.RequirePermission("role:manage"), deps.Handlers.User.AssignUserRoles)
+			protected.Get("/users", guard.Require("user:read"), deps.Handlers.User.GetUsers)
+			protected.Post("/users", guard.Require("user:write"), deps.Handlers.User.CreateUser)
+			protected.Put("/users/:id", guard.Require("user:write"), deps.Handlers.User.UpdateUser)
+			protected.Post("/users/:id/master", guard.Require("user:master"), deps.Handlers.User.SetMasterUser)
+			protected.Post("/users/:id/roles", guard.Require("role:manage"), deps.Handlers.User.AssignUserRoles)
 		}
 	}
 }
