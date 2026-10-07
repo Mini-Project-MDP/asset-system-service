@@ -298,6 +298,14 @@ func MigrateAndSeed(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("backfill approval engine columns: %w", err)
 	}
 
+	// Check if already seeded to ensure instant service startup
+	var userCount int
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&userCount)
+	if userCount >= 17 {
+		log.Println("Database schema verified; seed data already present.")
+		return nil
+	}
+
 	log.Println("Seeding permissions, roles, and user data...")
 	seedSQL := `
 	INSERT INTO permissions (id, code, name, description) VALUES
