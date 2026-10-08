@@ -108,16 +108,58 @@ func (s *requestService) DetailFor(ctx context.Context, id string, viewer domain
 	return item, nil
 }
 
-// refreshFromEngine updates the cached approval steps of a request synced with
-// the Approval Engine, when the engine is reachable.
+// refreshFromEngine brings a request synced with the Approval Engine up to
+// date with it, when the engine is reachable. A request in or past fulfillment
+// is left as it is: its approval is final, and the engine knows nothing later.
 func (s *requestService) refreshFromEngine(ctx context.Context, item *domain.AssetRequest) {
 	if s.engine == nil || item.ApprovalRequestID == nil || *item.ApprovalRequestID == "" {
+		return
+	}
+	if item.Status == domain.RequestStatusFulfillment || item.Status == domain.RequestStatusCompleted {
 		return
 	}
 	engReq, engErr := s.engine.GetRequest(ctx, *item.ApprovalRequestID)
 	if engErr != nil || engReq == nil || len(engReq.Steps) == 0 {
 		return
 	}
+	if err := s.mirrorEngineState(ctx, item, engReq); err != nil {
+		log.Printf("request %s: mirror engine state failed: %v", item.ID, err)
+	}
+}
+
+// mirrorEngineState copies the engine's view of a request onto the local row
+// and onto item: the status and current step, and the cached chain. Approvals
+// can be decided outside this service (the engine's own inbox), so this is how
+// they reach the request when no webhook does. A request whose fulfillment has
+// started keeps its status: the engine knows nothing past approval. The status
+// is written only when it changed, so viewing a request costs no write.
+func (s *requestService) mirrorEngineState(ctx context.Context, item *domain.AssetRequest, engReq *domain.EngineApprovalRequest) error {
+	if item.Status != domain.RequestStatusFulfillment && item.Status != domain.RequestStatusCompleted {
+		localStatus := localStatusForEngineStatus(engReq.Status)
+		stepName := engReq.CurrentStepName()
+		currentName := ""
+		if item.CurrentStepName != nil {
+			currentName = *item.CurrentStepName
+		}
+		if localStatus != item.Status || engReq.Status != item.ApprovalStatus ||
+			engReq.CurrentStepOrder != item.CurrentStep || stepName != currentName {
+			var stepNamePtr *string
+			if stepName != "" {
+				stepNamePtr = &stepName
+			}
+			if err := s.repo.SetApprovalDecisionResult(ctx, item.ID, localStatus, engReq.Status, engReq.CurrentStepOrder, stepNamePtr); err != nil {
+				return fmt.Errorf("mirror engine status: %w", err)
+			}
+			item.Status, item.ApprovalStatus = localStatus, engReq.Status
+			item.CurrentStep, item.CurrentStepName = engReq.CurrentStepOrder, stepNamePtr
+			// The repository starts an approved request at fulfillment step 0 (Processing).
+			if localStatus == domain.RequestStatusApproved && item.FulfillmentStep == nil {
+				processing := 0
+				item.FulfillmentStep = &processing
+			}
+		}
+	}
+
 	hasRevision := false
 	for _, h := range item.Hist {
 		if h.Action == "Requested revision" {
@@ -125,11 +167,13 @@ func (s *requestService) refreshFromEngine(ctx context.Context, item *domain.Ass
 			break
 		}
 	}
-	steps := mapEngineStepsToItems(engReq, hasRevision)
-	if len(steps) > 0 {
-		_ = s.repo.SaveApprovalSteps(ctx, item.ID, steps)
+	if steps := mapEngineStepsToItems(engReq, hasRevision); len(steps) > 0 {
+		if err := s.repo.SaveApprovalSteps(ctx, item.ID, steps); err != nil {
+			log.Printf("request %s: save approval steps failed: %v", item.ID, err)
+		}
 		item.Chain = steps
 	}
+	return nil
 }
 
 func (s *requestService) Create(ctx context.Context, input domain.CreateRequestInput) (*domain.AssetRequest, error) {
@@ -158,7 +202,18 @@ func (s *requestService) Create(ctx context.Context, input domain.CreateRequestI
 
 	s.syncToApprovalEngine(ctx, id, requester, input)
 
-	return s.Detail(ctx, id)
+	// Read back without Detail's engine refresh: the sync above has just stored
+	// what the engine answered, and a second engine round trip pushes the call
+	// past the frontend's request timeout (the request is saved, but the user
+	// is told it failed).
+	item, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, ErrRequestNotFound
+	}
+	return item, nil
 }
 
 // approvalEngineDocType maps an asset category to the Approval-Engine-Service
@@ -454,31 +509,9 @@ func (s *requestService) HandleEngineWebhook(ctx context.Context, event domain.E
 		return nil
 	}
 
-	hasRevision := false
-	for _, h := range local.Hist {
-		if h.Action == "Requested revision" {
-			hasRevision = true
-			break
-		}
-	}
-
-	localStatus := localStatusForEngineStatus(engReq.Status)
-	stepName := engReq.CurrentStepName()
-	var stepNamePtr *string
-	if stepName != "" {
-		stepNamePtr = &stepName
-	}
-	if err := s.repo.SetApprovalDecisionResult(ctx, local.ID, localStatus, engReq.Status, engReq.CurrentStepOrder, stepNamePtr); err != nil {
+	if err := s.mirrorEngineState(ctx, local, engReq); err != nil {
 		return fmt.Errorf("mirror webhook refresh for request %s: %w", local.ID, err)
 	}
-
-	stepItems := mapEngineStepsToItems(engReq, hasRevision)
-	if len(stepItems) > 0 {
-		if err := s.repo.SaveApprovalSteps(ctx, local.ID, stepItems); err != nil {
-			log.Printf("request %s: save approval steps after webhook failed: %v", local.ID, err)
-		}
-	}
-
 	return nil
 }
 

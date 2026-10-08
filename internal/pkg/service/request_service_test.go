@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -389,6 +390,24 @@ func TestRequestService_Create(t *testing.T) {
 		}
 	})
 
+	// The engine already answered the create call with the request's steps;
+	// asking it again for the response pushes the call past the frontend's timeout.
+	t.Run("answers without a second round trip to the engine", func(t *testing.T) {
+		repo := &fakeRequestRepository{
+			requesters: map[string]domain.RequesterInfo{"Laras P.": {UserID: "usr_1", EmployeeNo: "EMP101", ApprovalRank: 10}},
+			nextID:     "REQ-NEW2",
+		}
+		engine := &fakeApprovalEngineClient{}
+		svc := NewRequestService(repo, engine)
+
+		if _, err := svc.Create(context.Background(), validInput()); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(engine.createCalls) != 1 || len(engine.getCalls) != 0 {
+			t.Fatalf("expected one engine create and no engine get, got %d create and %d get", len(engine.createCalls), len(engine.getCalls))
+		}
+	})
+
 	t.Run("rejects invalid payload before touching the repository", func(t *testing.T) {
 		repo := &fakeRequestRepository{}
 		svc := NewRequestService(repo, &fakeApprovalEngineClient{})
@@ -764,6 +783,96 @@ func TestRequestService_HandleEngineWebhook(t *testing.T) {
 
 		if err := svc.HandleEngineWebhook(context.Background(), domain.EngineWebhookEvent{Event: "request.approved"}); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+// Approvals made outside this service (the Approval Engine's own inbox/portal)
+// reach it only through the webhook or a refresh. Opening the request must
+// bring its status along with its chain, not the chain alone.
+func TestRequestService_Detail_MirrorsEngineStatus(t *testing.T) {
+	engineID := "eng-REQ-0004"
+	firstStep := "Atasan +1"
+	fiveApprovedSteps := func(status string) *domain.EngineApprovalRequest {
+		steps := make([]domain.EngineApprovalStep, 0, 5)
+		for i := 1; i <= 5; i++ {
+			steps = append(steps, domain.EngineApprovalStep{StepOrder: i, Name: fmt.Sprintf("Atasan +%d", i), Status: "approved"})
+		}
+		return &domain.EngineApprovalRequest{ID: engineID, Status: status, CurrentStepOrder: 5, Steps: steps}
+	}
+
+	t.Run("a request approved in the engine becomes APPROVED", func(t *testing.T) {
+		repo := &fakeRequestRepository{items: []domain.AssetRequest{{
+			ID: "REQ-0004", Status: domain.RequestStatusWaitingApproval, ApprovalStatus: "pending",
+			ApprovalRequestID: &engineID, CurrentStepName: &firstStep,
+		}}}
+		svc := NewRequestService(repo, &fakeApprovalEngineClient{getResult: fiveApprovedSteps("approved")})
+
+		item, err := svc.Detail(context.Background(), "REQ-0004")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if item.Status != domain.RequestStatusApproved || item.ApprovalStatus != "approved" {
+			t.Fatalf("expected the returned request to be APPROVED/approved, got %s/%s", item.Status, item.ApprovalStatus)
+		}
+		if item.FulfillmentStep == nil || *item.FulfillmentStep != 0 {
+			t.Fatalf("expected an approved request to wait at fulfillment step 0, got %v", item.FulfillmentStep)
+		}
+		if len(repo.decisionResults) != 1 || repo.decisionResults[0].localStatus != domain.RequestStatusApproved || repo.decisionResults[0].currentStepOrder != 5 {
+			t.Fatalf("expected the APPROVED status to be saved, got %+v", repo.decisionResults)
+		}
+	})
+
+	t.Run("nothing is written when the engine has not moved", func(t *testing.T) {
+		repo := &fakeRequestRepository{items: []domain.AssetRequest{{
+			ID: "REQ-0004", Status: domain.RequestStatusWaitingApproval, ApprovalStatus: "pending",
+			ApprovalRequestID: &engineID, CurrentStep: 1, CurrentStepName: &firstStep,
+		}}}
+		engine := &fakeApprovalEngineClient{getResult: &domain.EngineApprovalRequest{
+			ID: engineID, Status: "pending", CurrentStepOrder: 1,
+			Steps: []domain.EngineApprovalStep{{StepOrder: 1, Name: firstStep, Status: "active"}},
+		}}
+		svc := NewRequestService(repo, engine)
+
+		if _, err := svc.Detail(context.Background(), "REQ-0004"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(repo.decisionResults) != 0 {
+			t.Fatalf("expected no status write for an unchanged request, got %+v", repo.decisionResults)
+		}
+	})
+
+	t.Run("a request already in fulfillment keeps its status", func(t *testing.T) {
+		repo := &fakeRequestRepository{items: []domain.AssetRequest{{
+			ID: "REQ-0004", Status: domain.RequestStatusFulfillment, ApprovalStatus: "approved", ApprovalRequestID: &engineID,
+		}}}
+		svc := NewRequestService(repo, &fakeApprovalEngineClient{getResult: fiveApprovedSteps("approved")})
+
+		item, err := svc.Detail(context.Background(), "REQ-0004")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if item.Status != domain.RequestStatusFulfillment || len(repo.decisionResults) != 0 {
+			t.Fatalf("expected FULFILLMENT to be left alone, got %s and writes %+v", item.Status, repo.decisionResults)
+		}
+	})
+
+	// Its approval is final, so asking the engine again only slows the fulfillment
+	// pages and their save/advance answers down (past the frontend's timeout).
+	t.Run("a request past approval is not looked up in the engine", func(t *testing.T) {
+		for _, status := range []string{domain.RequestStatusFulfillment, domain.RequestStatusCompleted} {
+			repo := &fakeRequestRepository{items: []domain.AssetRequest{{
+				ID: "REQ-0004", Status: status, ApprovalStatus: "approved", ApprovalRequestID: &engineID,
+			}}}
+			engine := &fakeApprovalEngineClient{getResult: fiveApprovedSteps("approved")}
+			svc := NewRequestService(repo, engine)
+
+			if _, err := svc.Detail(context.Background(), "REQ-0004"); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(engine.getCalls) != 0 {
+				t.Fatalf("%s: expected no engine lookup, got %d", status, len(engine.getCalls))
+			}
 		}
 	})
 }
